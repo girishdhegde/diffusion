@@ -87,6 +87,18 @@ class ResBlock(nn.Module):
         return y + self.shortcut(x)
 
 
+class PreNorm(nn.Module):
+    """ https://github.com/lucidrains/denoising-diffusion-pytorch
+    """
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.fn = fn
+        self.norm = nn.GroupNorm(1, dim)
+
+    def forward(self, x):
+        return self.fn(self.norm(x)) + x
+
+
 class Attention(nn.Module):
     """ Multi Headed Scaled Dot-Product Attention.
 
@@ -117,4 +129,78 @@ class Attention(nn.Module):
         out = rearrange(self.proj(out), 'b h w c -> b c h w')
 
         return out
+
+
+class DownBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, time_channels, groups, attn=False, downsample=True):
+        super().__init__()
+        self.conv = ResBlock(in_channels, out_channels, time_channels, groups)
+        self.attn = PreNorm(out_channels, Attention(out_channels, 128, heads=4)) if attn else nn.Identity()
+        self.ds = Downsample(out_channels, out_channels) if downsample else nn.Identity()
+
+    def forward(x, time_emb=None):
+        x = self.conv(x, time_emb)
+        x = self.attn(x)
+        ds = self.ds(x)
+        return x, ds
+
+
+class UpBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, time_channels, groups, attn=False, upsample=True):
+        super().__init__()
+        self.conv = ResBlock(in_channels, out_channels, time_channels, groups)
+        self.attn = PreNorm(out_channels, Attention(out_channels, 128, heads=4)) if attn else nn.Identity()
+        self.us = Upsample(out_channels, out_channels) if upsample else nn.Identity()
+
+    def forward(x, time_emb=None):
+        x = self.conv(x, time_emb)
+        x = self.attn(x)
+        x = self.us(x)
+        return x
+
+
+class MidBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, time_channels, groups):
+        super().__init__()
+        self.pre_conv = ResBlock(in_channels, out_channels, time_channels, groups)
+        self.attn = PreNorm(out_channels, Attention(out_channels, 128, heads=4))
+        self.post_conv = ResBlock(out_channels, out_channels, time_channels, groups)
+
+    def forward(x, time_emb=None):
+        x = self.pre_conv(x, time_emb)
+        x = self.attn(x)
+        x = self.post_conv(x, time_emb)
+        return x
+
+
+class UNet(nn.Module):
+    def __init__(
+        self,
+        in_channels=3,
+        out_channels=None,
+        dim=16,
+        dim_mults=(1, 2, 4, 8),
+        attn=(False, False, True, True),
+        n_blocks=1,
+        groups=4,
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels or in_channels
+        self.dim = dim
+        self.dim_mults = dim_mults
+        self.attn = attn
+        self.n_blocks = n_blocks
+        self.groups = groups
+        time_dim = dim*4
+
+        self.time_emb = nn.Sequential(
+            SinusoidalPositionEmbeddings(dim),
+            nn.Linear(dim, time_dim),
+            nn.GELU(),
+            nn.Linear(time_dim, time_dim),
+        )
+        self.init_conv = nn.Conv2d(in_channels, dim, 1)
+        self.final_res = ResBlock(dim*2, dim, time_dim, groups)
+        self.final_conv = nn.Conv2d(dim, self.out_channels, 1)
 
