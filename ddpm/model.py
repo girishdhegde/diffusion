@@ -25,7 +25,7 @@ class SinusoidalPositionEmbeddings(nn.Module):
     """ Positional Embedding
 
     Refs:
-        https://huggingface.co/blog/annotated-diffusion
+        https://github.com/lucidrains/denoising-diffusion-pytorch
     """
     def __init__(self, dim):
         super().__init__()
@@ -43,9 +43,9 @@ class SinusoidalPositionEmbeddings(nn.Module):
 
 class ResBlock(nn.Module):
     """ Residual Block: conv2(scale_shit(conv(x), linear(time_emb))) + x
-        author: girish d. hegde
 
     Refs:
+        https://github.com/lucidrains/denoising-diffusion-pytorch
         https://huggingface.co/blog/annotated-diffusion
     """
     def __init__(
@@ -54,6 +54,7 @@ class ResBlock(nn.Module):
         time_channels=None,
         groups=8,
     ):
+        super().__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1)
         self.norm1 = nn.GroupNorm(groups, out_channels)
         self.act1 = nn.SiLU()
@@ -85,4 +86,39 @@ class ResBlock(nn.Module):
         y = self.conv2(self.act1(y))
         return y + self.shortcut(x)
 
+
+class Attention(nn.Module):
+    """ Multi Headed Scaled Dot-Product Attention.
+
+    Args:
+        in_channels (int): input feature channels.
+        emb_dim (int): dimension.
+        heads (int): number of heads. (dq = dk = dv = d = emb_dim/h).
+    """
+    def __init__(self, in_channels, emb_dim, heads=1):
+        super().__init__()
+        self.in_channels = in_channels
+        self.emb_dim = emb_dim
+        self.heads = heads
+        self.d = emb_dim//heads
+        self.scale = self.d**-0.5
+
+        self.to_qkv = nn.Linear(in_channels, 3*emb_dim, bias=False)
+        self.proj = nn.Linear(emb_dim, in_channels, bias=True)
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+        x = rearrange(x, 'b c h w -> b h w c')
+        QKV = self.to_qkv(x)  # [b h w 3*emb_dim]
+        Q, K, V = QKV.chunk(3, dim=-1)  # [b h w emb_dim]
+        # [b, h, w, emb_dim] -> [b*heads, h*w, d_head]
+        Q, K, V = (rearrange(T, 'b h w (n d) -> (b n) (h w) d', n=self.heads, h=h) for T in (Q, K, V))
+        attn = torch.bmm(Q, K.permute(0, 2, 1))*self.scale  # [b*heads, h*w, h*w]
+        attn = F.softmax(attn, dim=-1)
+
+        out = torch.bmm(attn, V)  # [bs*heads, h*w, d_head]
+        out = rearrange(out, '(b n) (h w) d -> b h w (n d)', n=self.heads, h=h)  # [b, h, w, emb_dim]
+        out = rearrange(self.proj(out), 'b h w c -> b c h w')
+
+        return out
 
