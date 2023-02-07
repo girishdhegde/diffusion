@@ -58,14 +58,14 @@ class ResBlock(nn.Module):
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1)
         self.norm1 = nn.GroupNorm(groups, out_channels)
         self.act1 = nn.SiLU()
-        self.conv2 = nn.Sequential((
+        self.conv2 = nn.Sequential(
             nn.Conv2d(out_channels, out_channels, 3, padding=1),
             nn.GroupNorm(groups, out_channels),
             nn.SiLU(),
-        ))
+        )
         self.shortcut = nn.Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else nn.Identity()
         if time_channels is not None:
-            self.time_emb = nn.Sequential((nn.SiLU(), nn.Linear(time_channels, out_channels*2)))
+            self.time_emb = nn.Sequential(nn.SiLU(), nn.Linear(time_channels, out_channels*2))
         else:
             self.time_emb = None
 
@@ -97,12 +97,8 @@ class Attention(nn.Module):
     """
     def __init__(self, in_channels, emb_dim, heads=1):
         super().__init__()
-        self.in_channels = in_channels
-        self.emb_dim = emb_dim
         self.heads = heads
-        self.d = emb_dim//heads
-        self.scale = self.d**-0.5
-
+        self.scale = (emb_dim//heads)**-0.5
         self.to_qkv = nn.Linear(in_channels, 3*emb_dim, bias=False)
         self.proj = nn.Linear(emb_dim, in_channels, bias=True)
 
