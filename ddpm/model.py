@@ -1,7 +1,10 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
 
 
 __author__ = "__Girish_Hegde__"
@@ -81,7 +84,7 @@ class ResBlock(nn.Module):
         y = self.norm1(self.conv1(x))
         if (self.time_emb is not None) and (time_emb is not None):
             t = self.time_emb(time_emb)[..., None, None]  # [b, 2*c, 1, 1]
-            scale, shift = t.chunk(2, dim=1)
+            scale, shift = t.chunk(chunks=2, dim=1)
             y = y*(scale + 1) + shift
         y = self.conv2(self.act1(y))
         return y + self.shortcut(x)
@@ -134,11 +137,12 @@ class Attention(nn.Module):
 class DownBlock(nn.Module):
     def __init__(self, in_channels, out_channels, time_channels, groups, attn=False, downsample=True):
         super().__init__()
+        self.resize = downsample
         self.conv = ResBlock(in_channels, out_channels, time_channels, groups)
         self.attn = PreNorm(out_channels, Attention(out_channels, 128, heads=4)) if attn else nn.Identity()
         self.ds = Downsample(out_channels, out_channels) if downsample else nn.Identity()
 
-    def forward(x, time_emb=None):
+    def forward(self, x, time_emb=None):
         x = self.conv(x, time_emb)
         x = self.attn(x)
         ds = self.ds(x)
@@ -148,11 +152,12 @@ class DownBlock(nn.Module):
 class UpBlock(nn.Module):
     def __init__(self, in_channels, out_channels, time_channels, groups, attn=False, upsample=True):
         super().__init__()
+        self.resize = upsample
         self.conv = ResBlock(in_channels, out_channels, time_channels, groups)
         self.attn = PreNorm(out_channels, Attention(out_channels, 128, heads=4)) if attn else nn.Identity()
         self.us = Upsample(out_channels, out_channels) if upsample else nn.Identity()
 
-    def forward(x, time_emb=None):
+    def forward(self, x, time_emb=None):
         x = self.conv(x, time_emb)
         x = self.attn(x)
         x = self.us(x)
@@ -166,7 +171,7 @@ class MidBlock(nn.Module):
         self.attn = PreNorm(out_channels, Attention(out_channels, 128, heads=4))
         self.post_conv = ResBlock(out_channels, out_channels, time_channels, groups)
 
-    def forward(x, time_emb=None):
+    def forward(self, x, time_emb=None):
         x = self.pre_conv(x, time_emb)
         x = self.attn(x)
         x = self.post_conv(x, time_emb)
@@ -174,13 +179,24 @@ class MidBlock(nn.Module):
 
 
 class UNet(nn.Module):
+    """ UNet with Attention and Time embedding.
+
+    Args:
+        in_channels (int): input image channels.
+        out_channels (int): output channels.
+        dim (int): hidden layer channels.
+        dim_mults (tuple[int]): hidden channel layerwise multipliers.
+        attns (tuple[bool]): apply attention to corresponding layers if True.
+        n_blocks (int): no. of res blocks per stage.
+        groups (int): gropnorm num_groups.
+    """
     def __init__(
         self,
         in_channels=3,
         out_channels=None,
         dim=16,
         dim_mults=(1, 2, 4, 8),
-        attn=(False, False, True, True),
+        attns=(False, False, True, True),
         n_blocks=1,
         groups=4,
     ):
@@ -189,7 +205,7 @@ class UNet(nn.Module):
         self.out_channels = out_channels or in_channels
         self.dim = dim
         self.dim_mults = dim_mults
-        self.attn = attn
+        self.attns = attns
         self.n_blocks = n_blocks
         self.groups = groups
         time_dim = dim*4
@@ -204,3 +220,61 @@ class UNet(nn.Module):
         self.final_res = ResBlock(dim*2, dim, time_dim, groups)
         self.final_conv = nn.Conv2d(dim, self.out_channels, 1)
 
+        dims = [dim, *(m*dim for m in dim_mults)]
+        n_resolutions = len(dim_mults)
+        self.downs = nn.ModuleList()
+        self.ups = nn.ModuleList()
+
+        for i in range(n_resolutions):
+            in_ch, out_ch, attn = dims[i], dims[i + 1], attns[i]
+            for j in range(n_blocks):
+                ds = (i < (n_resolutions - 1)) and (j == (n_blocks - 1))
+                self.downs.append(
+                    DownBlock(in_ch, out_ch, time_dim, groups, attn, ds)
+                )
+                in_ch = out_ch
+
+        self.mid = MidBlock(dims[-1], dims[-1], time_dim, groups)
+
+        for i in range(n_resolutions - 1, -1, -1):
+            in_ch, out_ch, attn = dims[i + 1]*2, dims[i], attns[i]
+            for j in range(n_blocks):
+                us = (i > 0) and (j == (n_blocks - 1))
+                self.ups.append(
+                    UpBlock(in_ch, out_ch, time_dim, groups, attn, us)
+                )
+                in_ch = out_ch
+
+    def forward(self, x, time):
+        """
+        Args:
+            x (torch.tensor): [b, in_channels, h, w] - batch input images.
+            time (torch.tensor): [b, ] - batch time stamps.
+
+        Returns:
+            torch.tensor: [b, out_channels, h, w] - output tensor.
+        """
+        t = self.time_emb(time)
+        x = self.init_conv(x)
+        skips = [x]
+
+        for layer in self.downs:
+            h, x = layer(x, t)
+            if layer.resize:
+                skips.append(h)
+        skips.append(x)
+
+        x = self.mid(x, t)
+
+        concat = True
+        for layer in self.ups:
+            if concat:
+                x = torch.cat((x, skips.pop()), dim=1)
+                concat = False
+            if layer.resize: concat = True
+            x = layer(x, t)
+
+        x = torch.cat((x, skips.pop()), dim=1)
+        x = self.final_res(x, t)
+        x = self.final_conv(x)
+        return x
