@@ -10,6 +10,16 @@ from einops.layers.torch import Rearrange
 __author__ = "__Girish_Hegde__"
 
 
+def extract(a, t, x_shape):
+    """
+    Refs:
+        https://github.com/lucidrains/denoising-diffusion-pytorch
+    """
+    batch_size = t.shape[0]
+    out = a.gather(-1, t.cpu())
+    return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(t.device)
+
+
 def Upsample(dim, dim_out=None):
     return nn.Sequential(
         nn.Upsample(scale_factor=2, mode="nearest"),
@@ -278,3 +288,27 @@ class UNet(nn.Module):
         x = self.final_res(x, t)
         x = self.final_conv(x)
         return x
+
+
+def linear_schedule(start=0.0001, end=0.02, timesteps=100):
+    return np.linspace(start, end, timesteps)
+
+
+def cosine_schedule(timesteps=100):
+    steps = timesteps + 1
+    t = 0.05*math.pi*((torch.linspace(0, timesteps, steps)/timesteps) + 0.008)/(1.008)
+    ft = torch.cos(t)**2
+    alphas_ = ft/ft[0]
+    betas = 1 - (alphas_[1:]/alphas_[:-1])
+    return torch.clip(betas, 0.0001, 0.9999)
+
+
+class DenoiseDiffusion:
+    def __init__(self, model, timesteps=100, device='cpu'):
+        self.model = model
+        self.timesteps = timesteps
+        self.device = device
+
+        betas = self.linear_schedule(0.001, 0.02, timesteps)
+        alphas = 1 - betas
+        alphas_ = torch.cumprod(alphas, dim=0)
