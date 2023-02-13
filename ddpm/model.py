@@ -296,7 +296,7 @@ def linear_schedule(start=0.0001, end=0.02, timesteps=100):
 
 def cosine_schedule(timesteps=100):
     steps = timesteps + 1
-    t = 0.05*math.pi*((torch.linspace(0, timesteps, steps)/timesteps) + 0.008)/(1.008)
+    t = 0.5*math.pi*((torch.linspace(0, timesteps, steps)/timesteps) + 0.008)/(1.008)
     ft = torch.cos(t)**2
     alphas_ = ft/ft[0]
     betas = 1 - (alphas_[1:]/alphas_[:-1])
@@ -309,6 +309,8 @@ class DenoiseDiffusion:
         self.timesteps = timesteps
         self.device = device
 
-        betas = self.linear_schedule(0.001, 0.02, timesteps)
-        alphas = 1 - betas
-        alphas_ = torch.cumprod(alphas, dim=0)
+        self.betas = cosine_schedule(timesteps)
+        self.alphas = 1. - self.betas
+        self.alpha_cum_prods = torch.cumprod(self.alphas, dim=0)
+        self.root_alpha_cum_prods = torch.sqrt(self.alpha_cum_prods)
+        self.root_one_minus_apha_cum_prods = torch.sqrt(1 - self.alpha_cum_prods)
