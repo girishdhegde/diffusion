@@ -314,3 +314,13 @@ class DenoiseDiffusion:
         self.alpha_cum_prods = torch.cumprod(self.alphas, dim=0)
         self.root_alpha_cum_prods = torch.sqrt(self.alpha_cum_prods)
         self.root_one_minus_apha_cum_prods = torch.sqrt(1 - self.alpha_cum_prods)
+
+    def forward_sample(self, xstart, t, noise=None):
+        noise = torch.randn_like(xstart) if noise is None else noise
+        root_alpha_cum_prods = self.root_alpha_cum_prods[t].copy()
+        root_one_minus_apha_cum_prods = self.root_one_minus_apha_cum_prods[t].copy()
+        while root_alpha_cum_prods.ndim < xstart.ndim:
+            root_alpha_cum_prods = root_alpha_cum_prods[..., None]
+            root_one_minus_apha_cum_prods = root_one_minus_apha_cum_prods[..., None]
+        xt = root_alpha_cum_prods*xstart + root_one_minus_apha_cum_prods*noise
+        return xt, noise
