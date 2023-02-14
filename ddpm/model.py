@@ -315,7 +315,20 @@ class DenoiseDiffusion:
         self.root_alpha_cum_prods = torch.sqrt(self.alpha_cum_prods)
         self.root_one_minus_apha_cum_prods = torch.sqrt(1 - self.alpha_cum_prods)
 
+    @torch.no_grad()
     def forward_sample(self, xstart, t, noise=None):
+        """ Forward Diffuion - Addition of Noise.
+
+        Args:
+            xstart (torch.Tensor): [b, ...] - input data.
+            t (torch.LongTensor/List[int]): [b, ] - timesteps.
+            noise (torch.Tensor): [b, ...] noise (noise.shape == xstart.shape).
+
+        Returns:
+            tuple
+                torch.Tensor: xt - [b, ...] - noisy data.
+                torch.Tensor: noise - [b, ...] - noise.
+        """
         noise = torch.randn_like(xstart) if noise is None else noise
         root_alpha_cum_prods = self.root_alpha_cum_prods[t].copy()
         root_one_minus_apha_cum_prods = self.root_one_minus_apha_cum_prods[t].copy()
@@ -325,7 +338,17 @@ class DenoiseDiffusion:
         xt = root_alpha_cum_prods*xstart + root_one_minus_apha_cum_prods*noise
         return xt, noise
 
+    @torch.no_grad()
     def reverse_sample(self, xt, time=None):
+        """ Reverse Diffusion - Removal of Noise.
+
+        Args:
+            xt (torch.Tensor): [b, ...] - noisy data.
+            time (torch.LongTensor): [b, ] - timesteps.
+
+        Returns:
+            torch.Tensor: [b, ...] - denoised data.
+        """
         time = time or self.timesteps
         for i, t in enumerate(range(time - 1, 0, -1)):
             z = torch.rand_like(xt)
