@@ -324,3 +324,22 @@ class DenoiseDiffusion:
             root_one_minus_apha_cum_prods = root_one_minus_apha_cum_prods[..., None]
         xt = root_alpha_cum_prods*xstart + root_one_minus_apha_cum_prods*noise
         return xt, noise
+
+    def reverse_sample(self, xt, time=None):
+        time = time or self.timesteps
+        for i, t in enumerate(range(time - 1, 0, -1)):
+            z = torch.rand_like(xt)
+            eps = self.model(xt, t)
+            xt = self.recip_root_alphas[t]*(xt - betas_by_cum_prods[t]*eps) + sigmas[t]*z
+
+            img = (xt*0.5) + 0.5
+            ax[i].imshow(img[0])
+            ax[i].axis('off')
+
+        xt = recip_root_alphas[0]*(xt - betas_by_cum_prods[0]*self.model(xt, 0))
+
+        img = (xt*0.5) + 0.5
+        ax[-1].imshow(img[0])
+        ax[-1].axis('off')
+        plt.show()
+        return xt
