@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -310,10 +311,13 @@ class DenoiseDiffusion:
         self.device = device
 
         self.betas = cosine_schedule(timesteps)
+        self.sigmas = torch.sqrt(self.betas)
         self.alphas = 1. - self.betas
+        self.recip_root_alphas = 1/torch.sqrt(self.alphas)
         self.alpha_cum_prods = torch.cumprod(self.alphas, dim=0)
         self.root_alpha_cum_prods = torch.sqrt(self.alpha_cum_prods)
         self.root_one_minus_apha_cum_prods = torch.sqrt(1 - self.alpha_cum_prods)
+        self.betas_by_cum_prods = self.betas/self.root_one_minus_apha_cum_prods
 
     @torch.no_grad()
     def forward_sample(self, xstart, t, noise=None):
@@ -339,30 +343,36 @@ class DenoiseDiffusion:
         return xt, noise
 
     @torch.no_grad()
-    def reverse_sample(self, xt, time=None):
+    def reverse_sample(self, xt, time=None, return_timesteps=False):
         """ Reverse Diffusion - Removal of Noise.
 
         Args:
             xt (torch.Tensor): [b, ...] - noisy data.
             time (torch.LongTensor): [b, ] - timesteps.
+            return_timesteps (bool): return denoised data for each timesteps.
 
         Returns:
-            torch.Tensor: [b, ...] - denoised data.
+            torch.Tensor: [b, ...] if not return_timesteps else [b, t, ...] - denoised data.
         """
         time = time or self.timesteps
+        recip_root_alphas = self.recip_root_alphas.copy()
+        betas_by_cum_prods = self.betas_by_cum_prods.copy()
+        sigmas = self.sigmas.copy()
+        while recip_root_alphas.ndim < (xt.ndim + 1):
+            recip_root_alphas = recip_root_alphas[..., None]
+            betas_by_cum_prods = betas_by_cum_prods[..., None]
+            sigmas = sigmas[..., None]
+
+        out = [xt]
         for i, t in enumerate(range(time - 1, 0, -1)):
             z = torch.rand_like(xt)
             eps = self.model(xt, t)
-            xt = self.recip_root_alphas[t]*(xt - betas_by_cum_prods[t]*eps) + sigmas[t]*z
-
-            img = (xt*0.5) + 0.5
-            ax[i].imshow(img[0])
-            ax[i].axis('off')
-
+            xt = recip_root_alphas[t]*(xt - betas_by_cum_prods[t]*eps) + sigmas[t]*z
+            if return_timesteps: out.append(xt)
         xt = recip_root_alphas[0]*(xt - betas_by_cum_prods[0]*self.model(xt, 0))
+        
+        if return_timesteps: 
+            out.append(xt)
+            return torch.cat(out, dim=1)
 
-        img = (xt*0.5) + 0.5
-        ax[-1].imshow(img[0])
-        ax[-1].axis('off')
-        plt.show()
         return xt
