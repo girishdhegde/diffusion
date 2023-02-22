@@ -14,14 +14,15 @@ from torchvision import transforms
 __author__ = "__Girish_Hegde__"
 
 
-class ImageSet(Dataset):
+class DiffusionSet(Dataset):
     """ Pytorch Dataset class for Images.
 
     Args:
         size (int): image size.
         split (string): 'train' or 'val' or 'test'.
+        timesteps (int): diffusion timesteps.
     """
-    def __init__(self, size=64, split='train'):
+    def __init__(self, size=64, split='train', timesteps=100):
         super().__init__()
         ds = load_dataset("lambdalabs/pokemon-blip-captions", split=split)
         self.ds = [sample["image"].resize((size, size)) for sample in ds]
@@ -30,6 +31,7 @@ class ImageSet(Dataset):
                     transforms.ToTensor(),
                     transforms.Lambda(lambda t: (t * 2) - 1)
         ])
+        self.t = timesteps - 1
         self.len = len(self.ds)
 
     def __len__(self):
@@ -38,5 +40,7 @@ class ImageSet(Dataset):
     def __getitem__(self, index):
         """
             torch.FloatTensor: [c, h, w] - ouput image.
+            torch.LongTensor: [1, ] - timestep.
         """
-        return self.transform(self.ds[index])
+        t = random.randint(0, self.t)
+        return self.transform(self.ds[index]), torch.tensor([t], dtype=torch.int64)
