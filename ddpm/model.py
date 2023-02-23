@@ -334,8 +334,8 @@ class DenoiseDiffusion:
                 torch.Tensor: noise - [b, ...] - noise.
         """
         noise = torch.randn_like(xstart) if noise is None else noise
-        root_alpha_cum_prods = self.root_alpha_cum_prods[t].copy()
-        root_one_minus_apha_cum_prods = self.root_one_minus_apha_cum_prods[t].copy()
+        root_alpha_cum_prods = self.root_alpha_cum_prods[t].clone()
+        root_one_minus_apha_cum_prods = self.root_one_minus_apha_cum_prods[t].clone()
         while root_alpha_cum_prods.ndim < xstart.ndim:
             root_alpha_cum_prods = root_alpha_cum_prods[..., None]
             root_one_minus_apha_cum_prods = root_one_minus_apha_cum_prods[..., None]
@@ -355,9 +355,9 @@ class DenoiseDiffusion:
             torch.Tensor: [b, ...] if not return_timesteps else [b, t, ...] - denoised data.
         """
         time = time or self.timesteps
-        recip_root_alphas = self.recip_root_alphas.copy()
-        betas_by_cum_prods = self.betas_by_cum_prods.copy()
-        sigmas = self.sigmas.copy()
+        recip_root_alphas = self.recip_root_alphas.clone()
+        betas_by_cum_prods = self.betas_by_cum_prods.clone()
+        sigmas = self.sigmas.clone()
         while recip_root_alphas.ndim < (xt.ndim + 1):
             recip_root_alphas = recip_root_alphas[..., None]
             betas_by_cum_prods = betas_by_cum_prods[..., None]

@@ -43,4 +43,4 @@ class DiffusionSet(Dataset):
             torch.LongTensor: [1, ] - timestep.
         """
         t = random.randint(0, self.t)
-        return self.transform(self.ds[index]), torch.tensor([t], dtype=torch.int64)
+        return self.transform(self.ds[index]), torch.tensor(t, dtype=torch.int64)
