@@ -8,8 +8,8 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from gpt import GPT
-from data import BPETokenizer, PretrainSet
+from model import DenoiseDiffusion, cosine_schedule, linear_schedule, UNet
+from data import DiffusionSet
 from utils import set_seed, save_checkpoint, load_checkpoint, write_pred
 
 
@@ -17,33 +17,34 @@ __author__ = "__Girish_Hegde__"
 
 
 # config file - (overrides the parameters given here)
-CFG = './config/pretrain.py'  # 'path/to/config/file.py'
+# CFG = './config/pretrain.py'  # 'path/to/config/file.py'
+CFG = None
 # =============================================================
 # Parameters
-# (params inspired from from https://github.com/karpathy/nanoGPT/blob/master/train.py)
 # =============================================================
+
 # model
-EMB_DIM = 256
-HEADS = 8
-NUM_LAYERS = 12
-CONTEXT = 512
-DROPOUT = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
+IN_CHANNELS = 3
+OUT_CHANNELS = None
+DIM = 16
+DIM_MULTS = (1, 2, 4, 8)
+ATTNS = (False, False, True, True)
+N_BLOCKS = 1
+GROUPS = 4
+
 # logging
 LOGDIR = Path('./data/runs')
 LOAD = LOGDIR/'ckpt.pt'  # or None
 PRINT_INTERVAL = 10
+
 # dataset
-DATASET = './data/codeparrot_train.pkl'
-CACHE_DIR = './data/cache/codeparrot_train'
-EVALSET = './data/codeparrot_test.pkl'
-EVAL_CACHE_DIR = './data/cache/codeparrot_test'
-N_TASKS = 10
+TIMESTEPS = 100
+IMG_SIZE = 64
+
 # training
-BATCH_SIZE = 3
-GRAD_ACC_STEPS = 6  # used to simulate larger batch sizes
+BATCH_SIZE = 32
+GRAD_ACC_STEPS = 1  # used to simulate larger batch sizes
 MAX_ITERS = 100_000  # total number of training iterations
-# EVAL_INTERVAL = 2000
-EVAL_INTERVAL = 500
 EVAL_ITERS = 100
 EVAL_ONLY = False  # if True, script exits right after the first eval
 SAVE_EVERY = False  # save unique checkpoint at every eval interval.
@@ -64,40 +65,28 @@ MIN_LR = LR/10  # minimum learning rate, should be ~= learning_rate/10 per Chinc
 # init
 
 # warning!!! executes codes in config file directly with no safety!
-with open(CFG, 'r') as fp: exec(fp.read())  # import cfg settings
+if CFG is not None:
+    with open(CFG, 'r') as fp: exec(fp.read())  # import cfg settings
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 LOGDIR.mkdir(parents=True, exist_ok=True)
 set_seed(108)
 torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 torch.backends.cudnn.benchmark = True  # optimize backend algorithms
-extras = {'n_tasks':N_TASKS, 'pre-training':True}
+extras = {}
 
 # =============================================================
 # Tokenizer, Dataset, Dataloader init
 # =============================================================
-tokenizer = BPETokenizer(n_tasks=N_TASKS)
-if (Path(CACHE_DIR)/'dataset.pkl').is_file():
-    trainset = tokenizer.read_dataset((Path(CACHE_DIR)/'dataset.pkl'))
-else:
-    trainset = tokenizer.tokenize_dataset(DATASET, CACHE_DIR, True, True)
-if (Path(EVAL_CACHE_DIR)/'dataset.pkl').is_file():
-    evalset = tokenizer.read_dataset((Path(EVAL_CACHE_DIR)/'dataset.pkl'))
-else:
-    EVALSET = EVALSET if EVALSET is not None else DATASET
-    evalset = tokenizer.tokenize_dataset(EVALSET, EVAL_CACHE_DIR, True, True)
-
-trainset = PretrainSet(trainset, CONTEXT)
-evalset = PretrainSet(evalset, CONTEXT)
+trainset = DiffusionSet(IMG_SIZE, 'train', TIMESTEPS)
+evalset = DiffusionSet(IMG_SIZE, 'test', TIMESTEPS)
 print(f'Total training samples = {len(trainset)}')
-trainset.len = MAX_ITERS*BATCH_SIZE*GRAD_ACC_STEPS
-evalset.len = EVAL_ITERS*BATCH_SIZE
 
 trainloader = DataLoader(
-    trainset, batch_size=BATCH_SIZE, shuffle=False,
+    trainset, batch_size=BATCH_SIZE, shuffle=True,
 )
 evalloader = DataLoader(
-    evalset, batch_size=BATCH_SIZE, shuffle=False,
+    evalset, batch_size=BATCH_SIZE, shuffle=True,
 )
 
 # =============================================================

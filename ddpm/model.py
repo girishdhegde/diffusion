@@ -212,6 +212,7 @@ class UNet(nn.Module):
         groups=4,
     ):
         super().__init__()
+        assert dim%groups == 0, "dim must be divisible by groups"
         self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
         self.dim = dim
