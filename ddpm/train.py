@@ -76,7 +76,7 @@ torch.backends.cudnn.benchmark = True  # optimize backend algorithms
 extras = {}
 
 # =============================================================
-# Tokenizer, Dataset, Dataloader init
+# Dataset, Dataloader init
 # =============================================================
 trainset = DiffusionSet(IMG_SIZE, 'train', TIMESTEPS)
 evalset = DiffusionSet(IMG_SIZE, 'test', TIMESTEPS)
@@ -92,19 +92,19 @@ evalloader = DataLoader(
 # =============================================================
 # Model, Optimizer, Criterion init and Checkpoint load
 # =============================================================
-net = GPT(
-    EMB_DIM, HEADS, NUM_LAYERS,
-    tokenizer.n_vocab, CONTEXT,
-    DROPOUT, DROPOUT, DROPOUT,
+net = UNet(
+    IN_CHANNELS, OUT_CHANNELS, 
+    DIM, DIM_MULTS, ATTNS, 
+    N_BLOCKS, GROUPS,
 )
 net_state, optim_state, itr, best, kwargs = load_checkpoint(LOAD)
 if net_state is not None:
     net.load_state_dict(net_state)
 net.to(DEVICE)
-optimizer = net.get_optimizer(lr=LR, betas=(BETA1, BETA2), weight_decay=WEIGHT_DECAY)
+optimizer = optim.AdamW(net.parameters(), lr=LR, betas=(BETA1, BETA2), weight_decay=WEIGHT_DECAY)
 if optim_state is not None:
     optimizer.load_state_dict(optim_state)
-criterion = nn.CrossEntropyLoss()
+criterion = nn.MSELoss()
 print(f'Total model parameters = {net.n_params} = {net.n_params/1e6}M')
 
 # =============================================================
