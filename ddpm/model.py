@@ -290,6 +290,38 @@ class UNet(nn.Module):
         x = self.final_conv(x)
         return x
 
+    def get_config(self):
+        config = {
+            'in_channels':self.in_channels,
+            'out_channels':self.out_channels,
+            'dim':self.dim,
+            'dim_mults':self.dim_mults,
+            'attns':self.attns,
+            'n_blocks':self.n_blocks,
+            'groups':self.groups,
+        }
+        return config
+
+    def save_ckpt(self, filename):
+        ckpt = {
+            'config':self.get_config(),
+            'state_dict':self.state_dict(),
+        }
+        torch.save(ckpt, filename)
+        return ckpt
+
+    @property
+    def n_params(self):
+        total = sum(p.numel() for p in self.parameters())
+        return total
+
+    @classmethod
+    def create_from_ckpt(cls, filename):
+        ckpt = torch.load(filename)
+        net = cls(**ckpt['config'])
+        net.load_state_dict(ckpt['state_dict'])
+        return net
+
 
 def linear_schedule(start=0.0001, end=0.02, timesteps=100):
     return np.linspace(start, end, timesteps)
