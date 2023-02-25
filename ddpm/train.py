@@ -17,8 +17,9 @@ __author__ = "__Girish_Hegde__"
 
 
 # config file - (overrides the parameters given here)
-# CFG = './config/pretrain.py'  # 'path/to/config/file.py'
+# CFG = 'path/to/config/file.py'
 CFG = None
+
 # =============================================================
 # Parameters
 # =============================================================
@@ -43,23 +44,26 @@ IMG_SIZE = 64
 
 # training
 BATCH_SIZE = 32
-GRAD_ACC_STEPS = 1  # used to simulate larger batch sizes
-MAX_ITERS = 100_000  # total number of training iterations
+GRAD_ACC_STEPS = 1
+MAX_ITERS = 100_000
 EVAL_INTERVAL = 2000
 EVAL_ITERS = 100
-EVAL_ONLY = False  # if True, script exits right after the first eval
-SAVE_EVERY = False  # save unique checkpoint at every eval interval.
+EVAL_ONLY = False
+SAVE_EVERY = False
 GRADIENT_CLIP = None  # 5
+
 # adamw optimizer
-LR = 6e-4  # max learning rate
+LR = 6e-4
 WEIGHT_DECAY = 1e-2
 BETA1 = 0.9
 BETA2 = 0.95
+
 # learning rate decay settings
-DECAY_LR = True  # whether to decay the learning rate
-WARMUP_ITERS = 2000  # how many steps to warm up for
-LR_DECAY_ITERS = MAX_ITERS  # should be ~= max_iters per Chinchilla
-MIN_LR = LR/10  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+DECAY_LR = True
+WARMUP_ITERS = 2000
+LR_DECAY_ITERS = MAX_ITERS
+MIN_LR = LR/10
+
 # system
 # dtype = 'bfloat16' # 'float32' or 'bfloat16'
 # compile = True # use PyTorch 2.0 to compile the model to be faster
@@ -71,9 +75,9 @@ if CFG is not None:
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 LOGDIR.mkdir(parents=True, exist_ok=True)
 set_seed(108)
-torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-torch.backends.cudnn.benchmark = True  # optimize backend algorithms
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.backends.cudnn.benchmark = True
 extras = {'epoch':1}
 
 # =============================================================
