@@ -64,10 +64,4 @@ def write_pred(pred, outdir, name):
     pred = (np.clip(pred, 0, 1)*255).astype(np.uint8)
     for i, img in enumerate(pred):
         filename = outdir/f'{name}_{i}.png'
-        cv2.imwrite(filename, img[..., ::-1])
-
-
-@torch.no_grad()
-def sample(): pass
-
-
+        cv2.imwrite(str(filename), img[..., ::-1])

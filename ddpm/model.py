@@ -402,10 +402,14 @@ class DenoiseDiffusion:
         out = [xt]
         for i, t in enumerate(range(time - 1, 0, -1)):
             z = torch.rand_like(xt)
-            eps = self.model(xt, t)
+            tinp = torch.tensor([t], dtype=torch.int64, device=self.device)
+            tinp = repeat(tinp, '1 -> b', b=len(z))
+            eps = self.model(xt, tinp)
             xt = recip_root_alphas[t]*(xt - betas_by_cum_prods[t]*eps) + sigmas[t]*z
             if return_timesteps: out.append(xt)
-        xt = recip_root_alphas[0]*(xt - betas_by_cum_prods[0]*self.model(xt, 0))
+        tinp = torch.tensor([0], dtype=torch.int64, device=self.device)
+        tinp = repeat(tinp, '1 -> b', b=len(z))
+        xt = recip_root_alphas[0]*(xt - betas_by_cum_prods[0]*self.model(xt, tinp))
         
         if return_timesteps: 
             out.append(xt)

@@ -46,23 +46,17 @@ IMG_SIZE = 64
 BATCH_SIZE = 32
 GRAD_ACC_STEPS = 1
 MAX_ITERS = 100_000
-EVAL_INTERVAL = 2000
+EVAL_INTERVAL = 1000
 EVAL_ITERS = 100
 EVAL_ONLY = False
 SAVE_EVERY = False
 GRADIENT_CLIP = None  # 5
 
 # adamw optimizer
-LR = 6e-4
-WEIGHT_DECAY = 1e-2
+LR = 2e-5
+WEIGHT_DECAY = 1e-3
 BETA1 = 0.9
 BETA2 = 0.95
-
-# learning rate decay settings
-DECAY_LR = True
-WARMUP_ITERS = 2000
-LR_DECAY_ITERS = MAX_ITERS
-MIN_LR = LR/10
 
 # system
 # dtype = 'bfloat16' # 'float32' or 'bfloat16'
@@ -74,25 +68,26 @@ if CFG is not None:
     with open(CFG, 'r') as fp: exec(fp.read())  # import cfg settings
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 LOGDIR.mkdir(parents=True, exist_ok=True)
-set_seed(108)
+# set_seed(108)
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.benchmark = True
-extras = {'epoch':1}
+extras = {'img_size':IMG_SIZE, 'timesteps':TIMESTEPS, 'epoch':1}
 
 # =============================================================
 # Dataset, Dataloader init
 # =============================================================
 trainset = DiffusionSet(IMG_SIZE, 'train', TIMESTEPS)
-evalset = DiffusionSet(IMG_SIZE, 'test', TIMESTEPS)
+# evalset = DiffusionSet(IMG_SIZE, 'test', TIMESTEPS)
 print(f'Total training samples = {len(trainset)}')
 
 trainloader = DataLoader(
     trainset, batch_size=BATCH_SIZE, shuffle=True,
 )
-evalloader = DataLoader(
-    evalset, batch_size=BATCH_SIZE, shuffle=True,
-)
+# evalloader = DataLoader(
+#     evalset, batch_size=BATCH_SIZE, shuffle=True,
+# )
+evalloader = None
 
 # =============================================================
 # Model, Optimizer, Criterion init and Checkpoint load
@@ -103,7 +98,7 @@ net = UNet(
     N_BLOCKS, GROUPS,
 )
 net_state, optim_state, itr, best, kwargs = load_checkpoint(LOAD)
-if 'epoch' in kwargs: extras['epoch'] = kwargs['epoch']
+if kwargs is not None and 'epoch' in kwargs: extras['epoch'] = kwargs['epoch']
 epoch = extras['epoch']
 if net_state is not None:
     net.load_state_dict(net_state)
