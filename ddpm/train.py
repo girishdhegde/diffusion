@@ -108,6 +108,7 @@ optimizer = optim.AdamW(net.parameters(), lr=LR, betas=(BETA1, BETA2), weight_de
 if optim_state is not None:
     optimizer.load_state_dict(optim_state)
 criterion = nn.MSELoss()
+denoiser = DenoiseDiffusion(net, TIMESTEPS)
 print(f'Total model parameters = {net.n_params} = {net.n_params/1e6}M')
 
 # =============================================================
@@ -118,14 +119,14 @@ optimizer.zero_grad(set_to_none=True)
 print('Training ...')
 start_time = time.perf_counter()
 while True:
-    for itr_, (x, t) in enumerate(trainloader):
+    for itr_, (xstart, t) in enumerate(trainloader):
         # =============================================================
         # Training
         # =============================================================
         # forward, loss, backward with grad. accumulation
-        x, t = x.to(DEVICE), t.to(DEVICE)
-        eps = net(x, t)
-        noise = None
+        xstart, t = xstart.to(DEVICE), t.to(DEVICE)
+        xt, noise = denoiser.forward_sample(xstart, t) 
+        eps = net(xt, t)
         loss = criterion(eps, noise)
         loss.backward()
         loss_ += loss.item()
@@ -157,9 +158,10 @@ while True:
                     net.eval()
                     valloss = 0
                     with torch.no_grad():
-                        for eitr, (x, t) in tqdm(enumerate(evalloader), total=len(evalloader)):
-                            x, t = x.to(DEVICE), t.to(DEVICE)
-                            eps = net(x, t)
+                        for eitr, (xstart, t) in tqdm(enumerate(evalloader), total=len(evalloader)):
+                            xstart, t = xstart.to(DEVICE), t.to(DEVICE)
+                            xt, noise = denoiser.forward_sample(xstart, t) 
+                            eps = net(xt, t)
                             loss = criterion(eps, noise)
                             valloss += loss.item()
                             if eitr%EVAL_ITERS == 0: break
@@ -183,8 +185,9 @@ while True:
                     save_checkpoint(
                         net, optimizer, itr, valloss, trainloss, best, LOGDIR/'best.pt', **extras,
                     )
-
-                # write_pred(inp[0], valid_logits, tokenizer, LOGDIR/'predictions.txt', label=f'iteration = {itr}')
+                
+                pred = denoiser.reverse_sample(shape=(1, IN_CHANNELS, IMG_SIZE, IMG_SIZE))
+                write_pred(pred, LOGDIR/'predictions', name=f'{itr}')
 
                 logfile = LOGDIR/'log.txt'
                 log_data = f"epoch: {epoch}, \titeration: {itr}, \tval loss: {valloss}, \ttrain loss: {trainloss}, \tbest loss: {best}"

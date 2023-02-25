@@ -338,12 +338,12 @@ def cosine_schedule(timesteps=100):
 
 
 class DenoiseDiffusion:
-    def __init__(self, model, timesteps=100, device='cpu'):
+    def __init__(self, model, timesteps=100):
         self.model = model
         self.timesteps = timesteps
-        self.device = device
+        self.device = list(model.parameters())[0].device
 
-        self.betas = cosine_schedule(timesteps)
+        self.betas = cosine_schedule(timesteps).float().to(self.device)
         self.sigmas = torch.sqrt(self.betas)
         self.alphas = 1. - self.betas
         self.recip_root_alphas = 1/torch.sqrt(self.alphas)
@@ -366,7 +366,7 @@ class DenoiseDiffusion:
                 torch.Tensor: xt - [b, ...] - noisy data.
                 torch.Tensor: noise - [b, ...] - noise.
         """
-        noise = torch.randn_like(xstart) if noise is None else noise
+        noise = torch.randn_like(xstart, device=self.device) if noise is None else noise
         root_alpha_cum_prods = self.root_alpha_cum_prods[t].clone()
         root_one_minus_apha_cum_prods = self.root_one_minus_apha_cum_prods[t].clone()
         while root_alpha_cum_prods.ndim < xstart.ndim:
@@ -376,18 +376,21 @@ class DenoiseDiffusion:
         return xt, noise
 
     @torch.no_grad()
-    def reverse_sample(self, xt, time=None, return_timesteps=False):
+    def reverse_sample(self, xt=None, shape=(1, 3, 64, 64), time=None, return_timesteps=False):
         """ Reverse Diffusion - Removal of Noise.
 
         Args:
-            xt (torch.Tensor): [b, ...] - noisy data.
-            time (torch.LongTensor): [b, ] - timesteps.
+            xt (torch.Tensor): [b, ...] - noisy data. torch.randn(shape).
+            shape (tuple[int]): shape of noise. required iff xt is not given.
+            time (int): timesteps.
             return_timesteps (bool): return denoised data for each timesteps.
 
         Returns:
             torch.Tensor: [b, ...] if not return_timesteps else [b, t, ...] - denoised data.
         """
+        xt = torch.randn(shape, device=self.device) if xt is None else xt
         time = time or self.timesteps
+ 
         recip_root_alphas = self.recip_root_alphas.clone()
         betas_by_cum_prods = self.betas_by_cum_prods.clone()
         sigmas = self.sigmas.clone()

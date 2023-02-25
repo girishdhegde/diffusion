@@ -2,6 +2,7 @@ from pathlib import Path
 import random
 
 import numpy as np
+import cv2
 import torch
 import torch.nn.functional as F
 
@@ -54,7 +55,16 @@ def load_checkpoint(filename):
     return net_state, optim_state, itr, best, kwargs
 
 
-def write_pred(): pass
+@torch.no_grad()
+def write_pred(pred, outdir, name):
+    outdir = Path(outdir)
+    outdir.mkdir(exist_ok=True, parents=True)
+    pred = pred.cpu().numpy().transpose(0, 2, 3, 1)
+    pred = (pred*0.5) + 0.5
+    pred = (np.clip(pred, 0, 1)*255).astype(np.uint8)
+    for i, img in enumerate(pred):
+        filename = outdir/f'{name}_{i}.png'
+        cv2.imwrite(filename, img[..., ::-1])
 
 
 @torch.no_grad()
