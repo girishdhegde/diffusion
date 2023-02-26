@@ -1,1 +1,1 @@
-# diffusion
+# Denoising Diffusion Probabilistic Models - DDPM
