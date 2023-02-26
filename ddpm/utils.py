@@ -65,3 +65,4 @@ def write_pred(pred, outdir, name):
     for i, img in enumerate(pred):
         filename = outdir/f'{name}_{i}.png'
         cv2.imwrite(str(filename), img[..., ::-1])
+    return
