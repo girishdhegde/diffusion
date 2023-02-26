@@ -8,8 +8,8 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from model import DenoiseDiffusion, cosine_schedule, linear_schedule, UNet
-from data import DiffusionSet
+from model import DenoiseDiffusion, UNet
+from data import DiffusionSet, FashionMNISTDataset
 from utils import set_seed, save_checkpoint, load_checkpoint, write_pred
 
 
@@ -27,7 +27,7 @@ CFG = None
 # model
 IN_CHANNELS = 3
 OUT_CHANNELS = None
-DIM = 16
+DIM = 64
 DIM_MULTS = (1, 2, 4, 8)
 ATTNS = (False, False, True, True)
 N_BLOCKS = 1
@@ -36,14 +36,14 @@ GROUPS = 4
 # logging
 LOGDIR = Path('./data/runs')
 LOAD = LOGDIR/'ckpt.pt'  # or None
-PRINT_INTERVAL = 10
+PRINT_INTERVAL = 100
 
 # dataset
 TIMESTEPS = 100
 IMG_SIZE = 64
 
 # training
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 GRAD_ACC_STEPS = 1
 MAX_ITERS = 100_000
 EVAL_INTERVAL = 1000
@@ -53,7 +53,7 @@ SAVE_EVERY = False
 GRADIENT_CLIP = None  # 5
 
 # adamw optimizer
-LR = 2e-5
+LR = 2e-4
 WEIGHT_DECAY = 1e-3
 BETA1 = 0.9
 BETA2 = 0.95
@@ -78,6 +78,7 @@ extras = {'img_size':IMG_SIZE, 'timesteps':TIMESTEPS, 'epoch':1}
 # Dataset, Dataloader init
 # =============================================================
 trainset = DiffusionSet(IMG_SIZE, 'train', TIMESTEPS)
+# trainset = FashionMNISTDataset(TIMESTEPS)
 # evalset = DiffusionSet(IMG_SIZE, 'test', TIMESTEPS)
 print(f'Total training samples = {len(trainset)}')
 
@@ -150,7 +151,7 @@ while True:
             # =============================================================
             # Validation
             # =============================================================
-            if (itr%EVAL_INTERVAL == 0):
+            if (itr%EVAL_INTERVAL == 0) and (itr_ > 0):
                 print('Evaluating ...')
                 trainloss = trainloss/EVAL_INTERVAL
                 if evalloader is not None:
@@ -200,4 +201,6 @@ while True:
                 start_time = time.perf_counter()
                 print('Training ...')
             itr += 1
+            if itr > MAX_ITERS: break
+    if itr > MAX_ITERS: break
     epoch += 1

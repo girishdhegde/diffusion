@@ -1,14 +1,12 @@
-import re
 import random
 from pathlib import Path
-from copy import deepcopy
-import pickle
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 from datasets import load_dataset
 from torchvision import transforms
+from torchvision.datasets import FashionMNIST
 
 
 __author__ = "__Girish_Hegde__"
@@ -44,3 +42,23 @@ class DiffusionSet(Dataset):
         """
         t = random.randint(0, self.t)
         return self.transform(self.ds[index]), torch.tensor(t, dtype=torch.int64)
+    
+
+class FashionMNISTDataset(Dataset):
+    def __init__(self, timesteps=100, root='./data/fmnist', train=True):
+        Path(root).mkdir(exist_ok=True, parents=True)
+        self.dataset = FashionMNIST(
+            root=root, train=train, 
+            download=True, 
+            transform=transforms.ToTensor()
+        )
+        self.t = timesteps - 1
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        t = random.randint(0, self.t)
+        image, label = self.dataset[idx]
+        return image, torch.tensor(t, dtype=torch.int64)
+

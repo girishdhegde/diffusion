@@ -386,7 +386,7 @@ class DenoiseDiffusion:
             return_timesteps (bool): return denoised data for each timesteps.
 
         Returns:
-            torch.Tensor: [b, ...] if not return_timesteps else [b, t, ...] - denoised data.
+            torch.Tensor: [b, ...] if not return_timesteps else [t, b, ...] - denoised data.
         """
         xt = torch.randn(shape, device=self.device) if xt is None else xt
         time = time or self.timesteps
@@ -399,20 +399,18 @@ class DenoiseDiffusion:
             betas_by_cum_prods = betas_by_cum_prods[..., None]
             sigmas = sigmas[..., None]
 
-        out = [xt]
+        out, b = [xt], len(xt)
         for i, t in enumerate(range(time - 1, 0, -1)):
-            z = torch.rand_like(xt)
-            tinp = torch.tensor([t], dtype=torch.int64, device=self.device)
-            tinp = repeat(tinp, '1 -> b', b=len(z))
+            z = torch.randn_like(xt)
+            tinp = torch.full((b, ), t, dtype=torch.int64, device=self.device)
             eps = self.model(xt, tinp)
             xt = recip_root_alphas[t]*(xt - betas_by_cum_prods[t]*eps) + sigmas[t]*z
             if return_timesteps: out.append(xt)
-        tinp = torch.tensor([0], dtype=torch.int64, device=self.device)
-        tinp = repeat(tinp, '1 -> b', b=len(z))
-        xt = recip_root_alphas[0]*(xt - betas_by_cum_prods[0]*self.model(xt, tinp))
+        t = torch.zeros((b, ), dtype=torch.int64, device=self.device)
+        xt = recip_root_alphas[0]*(xt - betas_by_cum_prods[0]*self.model(xt, t))
         
         if return_timesteps: 
             out.append(xt)
-            return torch.cat(out, dim=1)
+            return rearrange(out, 'n b c h w -> n b c h w')
 
         return xt
