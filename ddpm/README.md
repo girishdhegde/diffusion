@@ -22,7 +22,7 @@ This repository contains implementation of Diffusion based Generative Model from
     3. Let $t$ be a sample from $\mathrm{Uniform}(\{1, \dotsc, T\})$
     4. Let $\epsilon$ be a sample from $\mathcal{N}(0, I)$
     5. Take gradient descent step on 
-            $\nabla_\theta$ MSE( $\epsilon$, $\epsilon_\theta(\sqrt{\bar{\alpha}_t} x_0 + \sqrt{1-\bar{\alpha}_t} \epsilon, t)$
+            $\nabla_\theta$ MSE{ $\epsilon$, $\epsilon_\theta$($\sqrt{\bar{\alpha}_t} x_0 + \sqrt{1-\bar{\alpha}_t} \epsilon, t$)}
             where $\epsilon_\theta$   is a function approximator intended to predict $\epsilon$ from $x_t$. 
     6. Until converged
     ```python
