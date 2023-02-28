@@ -12,7 +12,7 @@ This repository contains implementation of Diffusion based Generative Model from
 * process of **addition of noise**
 * $q(x_t|x_{t-1}) = \mathcal{N}(x_t; \sqrt{1 - \beta_t} x_{t-1}, \beta_t I)$
 * $x_t = \sqrt{1 - \beta_t} * x_{t-1} + \sqrt{\beta_t} * \mathcal{N}(0, I)$
-* $q(x_t|x_0) = \mathcal{N}(x_t; \sqrt{\bar{\alpha}_t} x_0, (1-\bar{\alpha}_t)I)$; $\alpha_t := 1 - \beta_t$ and $\bar{\alpha}_t := \prod_{s=1}^t \alpha_s$
+* $q(x_t|x_0) = \mathcal{N}(x_t; \sqrt{\bar{\alpha}_t} x_0, (1-\bar{\alpha}_t)I)$; $\alpha_t := 1 - \beta_t$ and $\bar{\alpha}_t$ = product($\alpha_t$)
 * $x_t =  \sqrt{\bar{\alpha}_t} x_0 + \sqrt{1-\bar{\alpha}_t} * \mathcal{N}(0, I)$ 
 * `xt = root_alpha_cum_prods*xstart + root_one_minus_apha_cum_prods*noise`
 * **Training**
@@ -22,7 +22,7 @@ This repository contains implementation of Diffusion based Generative Model from
     3. Let $t$ be a sample from $\mathrm{Uniform}(\{1, \dotsc, T\})$
     4. Let $\epsilon$ be a sample from $\mathcal{N}(0, I)$
     5. Take gradient descent step on 
-            $\nabla_\theta\left\| \mathbf{\left( \epsilon - \epsilon_\theta(\sqrt{\bar{\alpha}_t} x_0 + \sqrt{1-\bar{\alpha}_t} \epsilon, t) \right)} \right\|_2$
+            $\nabla_\theta$ MSE$\left( \epsilon - \epsilon_\theta(\sqrt{\bar{\alpha}_t} x_0 + \sqrt{1-\bar{\alpha}_t} \epsilon, t) \right)$
             where $\epsilon_\theta$   is a function approximator intended to predict $\epsilon$ from $x_t$. 
     6. Until converged
     ```python
