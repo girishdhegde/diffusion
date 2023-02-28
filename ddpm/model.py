@@ -1,3 +1,14 @@
+"""
+Refs:
+    https://arxiv.org/pdf/2006.11239.pdf
+    https://arxiv.org/pdf/2102.09672.pdf
+    https://arxiv.org/pdf/2301.11093.pdf
+    https://github.com/hojonathanho/diffusion/issues/5
+    https://github.com/lucidrains/denoising-diffusion-pytorch
+    https://huggingface.co/blog/annotated-diffusion
+    https://chat.openai.com
+"""
+
 import math
 
 import numpy as np
@@ -199,7 +210,7 @@ class UNet(nn.Module):
         dim_mults (tuple[int]): hidden channel layerwise multipliers.
         attns (tuple[bool]): apply attention to corresponding layers if True.
         n_blocks (int): no. of res blocks per stage.
-        groups (int): gropnorm num_groups.
+        groups (int): groupnorm num_groups.
     """
     def __init__(
         self,
