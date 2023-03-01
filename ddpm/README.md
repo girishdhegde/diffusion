@@ -125,10 +125,10 @@ refer respective module **docstring** for **more info**.
 
 # Results
 * Samples from **22M** model trained on **800** pokemons for **100K** steps with batch size of **16**
-<img src="https://github.com/girishdhegde/diffusion/blob/master/ddpm/assets/samples.PNG"/>
+<img src="./assets/samples.PNG"/>
 
 * Rerverse Diffusion visualization
-<img src="https://github.com/girishdhegde/diffusion/blob/master/ddpm/assets/denoising.PNG"/>
+<img src="./assets/denoising.PNG">
 
 ## License - MIT
 
