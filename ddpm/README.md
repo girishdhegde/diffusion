@@ -125,9 +125,9 @@ refer respective module **docstring** for **more info**.
 
 # Results
 * Samples from **22M** model trained on **800** pokemons for **100K** steps with batch size of **16**
-![samples](https://github.com/girishdhegde/diffusion/blob/master/ddpm/assets/samples.png)
+<img src="https://github.com/girishdhegde/diffusion/blob/master/ddpm/assets/samples.png"/>
 * Rerverse Diffusion visualization
-![reverse diffusion](https://github.com/girishdhegde/diffusion/blob/master/ddpm/assets/denoising.png)
+<img src="https://github.com/girishdhegde/diffusion/blob/master/ddpm/assets/denoising.png"/>
 ## License - MIT
 
 # References
