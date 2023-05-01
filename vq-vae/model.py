@@ -10,9 +10,9 @@ class ResBlock(nn.Module):
     def __init__(self, ch):
         super().__init__()
         self.layers = nn.Sequential(
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Conv2d(ch, ch, 3, 1, padding=1),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Conv2d(ch, ch, 1, 1),
         )
 
@@ -27,11 +27,10 @@ class Encoder(nn.Module):
         super().__init__()
         self.layers = nn.Sequential(
             nn.Conv2d(in_ch, hidden_ch // 2, 4, 2, padding=1),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Conv2d(hidden_ch // 2, hidden_ch, 4, 2, padding=1),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             *(ResBlock(hidden_ch) for _ in range(res_layers)),
-            nn.ReLU(inplace=True),
         )
 
     def forward(self, x):
@@ -45,19 +44,19 @@ class Decoder(nn.Module):
         super().__init__()
         self.layers = nn.Sequential(
             *(ResBlock(hidden_ch) for _ in range(res_layers)),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Upsample(scale_factor=2, mode='bilinear'),
             nn.Conv2d(hidden_ch, hidden_ch, 3, 1, padding=1),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Upsample(scale_factor=2, mode='bilinear'),
             nn.Conv2d(hidden_ch, hidden_ch, 3, 1, padding=1),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Conv2d(hidden_ch, in_ch, 1, 1),
         )
 
     def forward(self, x):
         return self.layers(x)
-        
+
 
 class VectorQuantizer(nn.Module):
     """ VQ: converts continous latents 'ze' to discrete latents 'z' then maps 'z' to nearest embedding vectors 'zq'. 
