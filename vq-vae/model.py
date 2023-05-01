@@ -63,7 +63,19 @@ class VectorQuantizer(nn.Module):
     """
     def __init__(self, num_emb, dimension):
         super().__init__()
-    self.code_book = nn.Parameter(torch.rand(size=(num_emb, dimension)))
+        self.code_book = nn.Parameter(torch.rand(size=(num_emb, dimension)))
 
     def forward(self, x):
-        b, h, w, c = x.shape
+        b, c, h, w = x.shape
+        x = rearrange(x, 'b c h w -> (b h w) c')
+       
+        # distance = z**2 + e**2 - 2 e * z
+        sq = torch.sum(self.code_book**2, dim=-1)[None, :] + torch.sum(x**2, dim=-1)[:, None]  # [b, k, c]
+        dist = sq - 2*torch.einsum('bc, kc -> bk', x, self.code_book)
+
+        # get nearest embedding
+        min_ids = torch.argmin(dist, dim=-1)
+        emb = self.code_book[min_ids]
+        emb = rearrange(emb, '(b h w) c -> b c h w', b=b, h=h, w=w)
+
+        return emb
