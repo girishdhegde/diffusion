@@ -63,7 +63,7 @@ class VectorQuantizer(nn.Module):
     """
     def __init__(self, num_emb, dimension):
         super().__init__()
-        self.code_book = nn.Parameter(torch.rand(size=(num_emb, dimension)))
+        self.code_book = nn.Parameter(torch.FloatTensor(num_emb, dimension).uniform_(-1/num_emb, 1/num_emb))
 
     def forward(self, x):
         b, c, h, w = x.shape
@@ -74,8 +74,9 @@ class VectorQuantizer(nn.Module):
         dist = sq - 2*torch.einsum('bc, kc -> bk', x, self.code_book)
 
         # get nearest embedding
-        min_ids = torch.argmin(dist, dim=-1)
-        emb = self.code_book[min_ids]
-        emb = rearrange(emb, '(b h w) c -> b c h w', b=b, h=h, w=w)
+        ids = torch.argmin(dist, dim=-1)
+        ids = rearrange(ids, '(b h w) -> b h w', b=b, h=h, w=w)
+        emb = self.code_book[ids]
+        emb = emb.permute(0, 3, 1, 2)
 
-        return emb
+        return ids, emb
