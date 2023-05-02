@@ -18,16 +18,10 @@ def set_seed(seed):
 
 
 def save_checkpoint(
-        net, optim, itr, val_loss, train_loss, best, filename, **kwargs,
+        vqvae, itr, val_loss, train_loss, best, filename, **kwargs,
     ):
     ckpt = {
-        'net':{
-            'config':net.get_config(),
-            'state_dict':net.state_dict(),
-        },
-        'optimizer':{
-            'state_dict':optim.state_dict(),
-        },
+        'vqvae': vqvae,
         'training':{
             'iteration':itr, 'val_loss':val_loss, 'train_loss':train_loss, 'best':best,
         },
@@ -39,20 +33,18 @@ def save_checkpoint(
 
 def load_checkpoint(filename):
     itr, best = 1, float('inf')
-    net_state, optim_state, kwargs = None, None, None
+    vqvae_ckpt, kwargs = None, None
     if filename is not None:
         if Path(filename).is_file():
             ckpt = torch.load(filename, map_location='cpu')
-            net_state = ckpt['net']['state_dict']
-            optim_state = ckpt['optimizer']['state_dict']
-            print('Model & Optim state dicts loaded successfully ...')
+            vqvae_ckpt = ckpt['vqvae']
             if 'training' in ckpt:
                 itr, val_loss, train_loss, best = ckpt['training'].values()
                 print('Training parameters loaded successfully ...')
             if 'kwargs' in ckpt:
                 kwargs = ckpt['kwargs']
                 print('Additional kwargs loaded successfully ...')
-    return net_state, optim_state, itr, best, kwargs
+    return vqvae_ckpt, itr, best, kwargs
 
 
 @torch.no_grad()

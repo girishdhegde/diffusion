@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.funcitonal as F
+import torch.nn.functional as F
 from einops import repeat, rearrange
 
 
@@ -95,7 +95,7 @@ class VQVAE(nn.Module):
     def __init__(
         self, 
         in_ch=3, res_layers=2, hidden_ch=256, num_emb=8*8*10, 
-        beta=0.25, lr=2e-4, 
+        beta=0.25, lr=2e-4, device='cuda',
         ckpt=None, inference=False,
     ):
         super().__init__()
@@ -105,11 +105,13 @@ class VQVAE(nn.Module):
         self.num_emb = num_emb
         self.beta = beta
         self.lr = lr
+        self.device = device
 
         if ckpt is None:
             self.enc = Encoder(in_ch, res_layers, hidden_ch)
             self.vq  = VectorQuantizer(num_emb, hidden_ch, beta)
             self.dec = Decoder(in_ch, res_layers, hidden_ch)
+            self.to(device)
             self.opt = torch.optim.Adam(self.parameters(), lr=lr)
         else:
             self.load_ckpt(ckpt, inference)
@@ -144,7 +146,7 @@ class VQVAE(nn.Module):
 
     def load_ckpt(self, ckpt, inference=False):
         if not isinstance(ckpt, dict): ckpt = torch.load(ckpt, map_location='cpu')
-        config, enc, vq, dec = ckpt['net']
+        config, enc, vq, dec = ckpt['net'].values()
         for k, v in config.items():
             setattr(self, k, v)
         self.enc = Encoder(self.in_ch, self.res_layers, self.hidden_ch)
