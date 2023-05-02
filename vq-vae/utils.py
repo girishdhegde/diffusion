@@ -49,13 +49,13 @@ def load_checkpoint(filename):
 
 @torch.no_grad()
 def write_pred(pred, outdir, name, scale=1):
-    outdir = Path(outdir)
+    outdir = Path(outdir)/name
     outdir.mkdir(exist_ok=True, parents=True)
     pred = pred.cpu().numpy().transpose(0, 2, 3, 1)
     pred = (pred*0.5) + 0.5
     pred = (np.clip(pred, 0, 1)*255).astype(np.uint8)
     for i, img in enumerate(pred):
-        filename = outdir/f'{name}_{i}.png'
+        filename = outdir/f'{i}.png'
         img = cv2.resize(
             img, 
             (int(img.shape[1]*scale), int(img.shape[0]*scale)), 

@@ -83,6 +83,7 @@ vqvae = VQVAE(
 trainloss, valloss, log_trainloss = 0, 0, 0
 vqvae.train()
 vqvae.zero_grad(set_to_none=True)
+trainloader_, evalloader_ = iter(trainloader), iter(evalloader)
 print('Training ...')
 start_time = time.perf_counter()
 for itr in range(itr, MAX_ITERS + 1):
@@ -94,8 +95,12 @@ for itr in range(itr, MAX_ITERS + 1):
         vqvae.eval()
         valloss = 0
         with torch.no_grad():
-            for data in tqdm(iter(evalset), total=len(evalset)):
-                (ray_colors_c, ray_colors_f, valids), loss = vqvae.forward(data)
+            for _ in tqdm(range(EVAL_ITERS)):
+                try: data, lbl = next(evalloader_)
+                except StopIteration:
+                    evalloader_ = iter(evalloader)
+                    data, lbl = next(evalloader_)
+                (ze, z, zq, pred), loss = vqvae.forward(data)
                 valloss += loss.item()
         vqvae.train()
 
@@ -122,13 +127,7 @@ for itr in range(itr, MAX_ITERS + 1):
                 vqvae.get_ckpt(), itr, valloss, trainloss, best, LOGDIR/'best.pt',
             )
         
-        idx, ray_o, ray_d, d, rgb = evalset.get_image()
-        rgb_c, rgb_f, vs = vqvae.render_image(ray_o, ray_d, N_RAYS)
-        rays2image(
-            rgb_f, vs, evalset.h, evalset.w, 
-            stride=1, scale=VIZ_SCALE, bgr=False, 
-            show=False, filename=LOGDIR/'renders'/f'{itr}_{idx}.png'
-        )
+        write_pred(pred, LOGDIR/'predictions', str(itr), scale=2)
 
         logfile = LOGDIR/'log.txt'
         log_data = f"iteration: {itr}/{MAX_ITERS}, \tval loss: {valloss}, \ttrain loss: {trainloss}, \tbest loss: {best}"
@@ -148,8 +147,11 @@ for itr in range(itr, MAX_ITERS + 1):
     # forward, loss, backward with grad. accumulation
     loss_ = 0
     for step in range(GRAD_ACC_STEPS):
-        data = next(trainloader)
-        (ray_colors_c, ray_colors_f, valids), loss = vqvae.forward(data)
+        try: data, lbl = next(trainloader_)
+        except StopIteration:
+            trainloader_ = iter(trainloader)
+            data, lbl = next(trainloader_)
+        (ze, z, zq, pred), loss = vqvae.forward(data)
         loss.backward()
         loss_ += loss.item()
 
@@ -157,9 +159,7 @@ for itr in range(itr, MAX_ITERS + 1):
     loss_ = loss_/GRAD_ACC_STEPS
     trainloss += loss_
     log_trainloss += loss_
-
-    if DECAY_LR: lr = get_lr(itr)
-    vqvae.optimize(GRADIENT_CLIP, new_lr=None if not DECAY_LR else lr, set_to_none=True)
+    vqvae.optimize(GRADIENT_CLIP, new_lr=None, set_to_none=True)
 
     # print info.
     if itr%PRINT_INTERVAL == 0:
