@@ -62,7 +62,7 @@ if (CFG is not None) and Path(CFG).is_file():
 # Dataset, Dataloader init
 # =============================================================
 trainset, evalset = load_cifar()
-trainloader, evalloader = data_loaders(train_data, val_data, BATCH_SIZE)
+trainloader, evalloader = data_loaders(trainset, evalset, BATCH_SIZE)
 # =============================================================
 # Load Checkpoint
 # =============================================================
@@ -100,6 +100,7 @@ for itr in range(itr, MAX_ITERS + 1):
                 except StopIteration:
                     evalloader_ = iter(evalloader)
                     data, lbl = next(evalloader_)
+                data = data.to(DEVICE)
                 (ze, z, zq, pred), loss = vqvae.forward(data)
                 valloss += loss.item()
         vqvae.train()
@@ -151,6 +152,7 @@ for itr in range(itr, MAX_ITERS + 1):
         except StopIteration:
             trainloader_ = iter(trainloader)
             data, lbl = next(trainloader_)
+        data = data.to(DEVICE)
         (ze, z, zq, pred), loss = vqvae.forward(data)
         loss.backward()
         loss_ += loss.item()
