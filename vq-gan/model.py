@@ -274,6 +274,56 @@ class Decoder(nn.Module):
         return x
 
 
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        nn.init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find('BatchNorm') != -1:
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0)
+
+
+class NLayerDiscriminator(nn.Module):
+    """Defines a PatchGAN discriminator as in Pix2Pix
+        --> see https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py
+                https://github.com/CompVis/taming-transformers/blob/master/taming/modules/discriminator/model.py
+    """
+    def __init__(self, input_nc=3, ndf=64, n_layers=5):
+        """Construct a PatchGAN discriminator
+        Parameters:
+            input_nc (int)  -- the number of channels in input images
+            ndf (int)       -- the number of filters in the last conv layer
+            n_layers (int)  -- the number of conv layers in the discriminator
+        """
+        super().__init__()
+        norm_layer = nn.BatchNorm2d
+        use_bias = False
+
+        kw = 4
+        sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=2, padding=1), nn.LeakyReLU(0.2, True)]
+        nf_mult = 1
+        in_ch = 1
+        out_ch = ndf
+        for n in range(1, n_layers):  # gradually increase the number of filters
+            in_ch = out_ch
+            nf_mult = min(2 ** n, 8)
+            out_ch = ndf * nf_mult
+            out_ch = min(out_ch, 256)
+            sequence += [
+                nn.Conv2d(in_ch, out_ch, kernel_size=kw, stride=2, padding=1, bias=use_bias),
+                norm_layer(out_ch),
+                nn.LeakyReLU(0.2, True)
+            ]
+
+        sequence += [
+            nn.Conv2d(out_ch, 1, kernel_size=1, stride=1)]  # output 1 channel prediction map
+        self.main = nn.Sequential(*sequence)
+
+    def forward(self, input):
+        """Standard forward."""
+        return self.main(input)
+
+
 # class VectorQuantizer(nn.Module):
 #     """ VQ: converts continous latents 'ze' to discrete latents 'z' then maps 'z' to nearest embedding vectors 'zq'. 
 #     """
