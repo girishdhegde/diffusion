@@ -153,8 +153,8 @@ class Encoder(nn.Module):
     def __init__(
         self,
         in_channels=3,
-        dim=16,
-        dim_mults=(1, 2, 4, 8, 16),
+        dim=8,
+        dim_mults=(2, 4, 8, 16, 32),
         n_blocks=1,
         groups=4,
     ):
@@ -220,8 +220,8 @@ class Decoder(nn.Module):
     def __init__(
         self,
         out_channels=3,
-        dim=16,
-        dim_mults=(1, 2, 4, 8, 16),
+        dim=8,
+        dim_mults=(2, 4, 8, 16, 32),
         n_blocks=1,
         groups=4,
     ):
@@ -283,45 +283,41 @@ def weights_init(m):
         nn.init.constant_(m.bias.data, 0)
 
 
-class NLayerDiscriminator(nn.Module):
-    """Defines a PatchGAN discriminator as in Pix2Pix
-        --> see https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py
-                https://github.com/CompVis/taming-transformers/blob/master/taming/modules/discriminator/model.py
+class Discriminator(nn.Module):
+    """ PatchGAN discriminator as in Pix2Pix
+    
+    Refs:
+        https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py
+        https://github.com/CompVis/taming-transformers/blob/master/taming/modules/discriminator/model.py
     """
-    def __init__(self, input_nc=3, ndf=64, n_layers=5):
-        """Construct a PatchGAN discriminator
-        Parameters:
-            input_nc (int)  -- the number of channels in input images
-            ndf (int)       -- the number of filters in the last conv layer
-            n_layers (int)  -- the number of conv layers in the discriminator
-        """
+    def __init__(self, in_channels=3, dim=8, dim_mults=(2, 4, 8, 16, 32)):
+
         super().__init__()
-        norm_layer = nn.BatchNorm2d
-        use_bias = False
+        layers = [nn.Conv2d(in_channels, dim, 1), nn.LeakyReLU(0.2, True)]
+        
+        dims = [dim, *(m*dim for m in dim_mults)]
+        n_resolutions = len(dim_mults)
 
-        kw = 4
-        sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=2, padding=1), nn.LeakyReLU(0.2, True)]
-        nf_mult = 1
-        in_ch = 1
-        out_ch = ndf
-        for n in range(1, n_layers):  # gradually increase the number of filters
-            in_ch = out_ch
-            nf_mult = min(2 ** n, 8)
-            out_ch = ndf * nf_mult
-            out_ch = min(out_ch, 256)
-            sequence += [
-                nn.Conv2d(in_ch, out_ch, kernel_size=kw, stride=2, padding=1, bias=use_bias),
-                norm_layer(out_ch),
-                nn.LeakyReLU(0.2, True)
+        for i in range(n_resolutions):
+            in_ch, out_ch = dims[i], dims[i + 1]
+            layers += [
+                nn.Conv2d(in_ch, out_ch, 4, 2, padding=1, bias=False),
+                nn.BatchNorm2d(out_ch),
+                nn.LeakyReLU(0.2, True),
             ]
+            in_ch = out_ch
 
-        sequence += [
-            nn.Conv2d(out_ch, 1, kernel_size=1, stride=1)]  # output 1 channel prediction map
-        self.main = nn.Sequential(*sequence)
+        layers += [
+            nn.Conv2d(out_ch, out_ch, 3, 1, padding=1, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(out_ch, 1, 1, 1)
+        ]
 
-    def forward(self, input):
-        """Standard forward."""
-        return self.main(input)
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)
 
 
 class VectorQuantizer(nn.Module):
