@@ -352,21 +352,23 @@ class VectorQuantizer(nn.Module):
         return ids, emb, emb_loss
 
     
-# class VQVAE(nn.Module):
-#     def __init__(
-#         self, 
-#         in_ch=3, res_layers=2, hidden_ch=256, num_emb=8*8*10, 
-#         beta=0.25, lr=2e-4, device='cuda',
-#         ckpt=None, inference=False,
-#     ):
-#         super().__init__()
-#         self.in_ch = in_ch
-#         self.res_layers = res_layers
-#         self.hidden_ch = hidden_ch
-#         self.num_emb = num_emb
-#         self.beta = beta
-#         self.lr = lr
-#         self.device = device
+class VQGAN(nn.Module):
+    def __init__(
+        self, 
+        in_ch=3, downsampling_factor=5, hidden_ch=256, num_emb=8*8*10,
+        img_size=256, 
+        beta=0.25, lr=2e-4, device='cuda',
+        ckpt=None, inference=False,
+    ):
+        super().__init__()
+        self.in_ch = in_ch
+        self.downsampling_factor = downsampling_factor
+        self.hidden_ch = hidden_ch
+        self.num_emb = num_emb
+        self.img_size = img_size
+        self.beta = beta
+        self.lr = lr
+        self.device = device
 
 #         if ckpt is None:
 #             self.enc = Encoder(in_ch, res_layers, hidden_ch)
