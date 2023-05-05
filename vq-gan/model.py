@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 
+from loss import LPIPS
+
 
 __author__ = "__Girish_Hegde__"
 
@@ -356,7 +358,7 @@ class VQGAN(nn.Module):
     def __init__(
         self, 
         in_ch=3, downsampling_factor=5, hidden_ch=256, num_emb=8*8*10,
-        img_size=256, 
+        perceptual_loss=True,
         beta=0.25, lr=2e-4, device='cuda',
         ckpt=None, inference=False,
     ):
@@ -365,20 +367,28 @@ class VQGAN(nn.Module):
         self.downsampling_factor = downsampling_factor
         self.hidden_ch = hidden_ch
         self.num_emb = num_emb
-        self.img_size = img_size
+        self.perceptual_loss = perceptual_loss
         self.beta = beta
         self.lr = lr
         self.device = device
+        if ckpt is None:
+            dim = hidden_ch//(w**downsampling_factor)
+            dim_mults = tuple(2**i for i in range(1, downsampling_factor + 1))
+            self.enc = Encoder(in_ch, dim, dim_mults)
+            self.vq  = VectorQuantizer(num_emb, hidden_ch, beta)
+            self.dec = Decoder(in_ch, dim, dim_mults)
+            self.dis = Discriminator(in_ch, dim, dim_mults).apply(weights_init)
+            self.to(device)
+            self.opt = torch.optim.Adam(self.parameters(), lr=lr)
+        else:
+            self.load_ckpt(ckpt, inference)
 
-#         if ckpt is None:
-#             self.enc = Encoder(in_ch, res_layers, hidden_ch)
-#             self.vq  = VectorQuantizer(num_emb, hidden_ch, beta)
-#             self.dec = Decoder(in_ch, res_layers, hidden_ch)
-#             self.to(device)
-#             self.opt = torch.optim.Adam(self.parameters(), lr=lr)
-#         else:
-#             self.load_ckpt(ckpt, inference)
-
+        self.recon_loss = nn.MSELoss()
+        self.gan_loss = nn.BCELoss()
+        # if perceptual_loss:
+        #     self.recon_loss = LPIPS().eval()
+        #     self.recon_loss.to(device)
+            
 #     def forward(self, x):
 #         ze = self.enc(x)
 #         z, zq, emb_loss = self.vq(ze)
