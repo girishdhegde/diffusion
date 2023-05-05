@@ -324,36 +324,36 @@ class NLayerDiscriminator(nn.Module):
         return self.main(input)
 
 
-# class VectorQuantizer(nn.Module):
-#     """ VQ: converts continous latents 'ze' to discrete latents 'z' then maps 'z' to nearest embedding vectors 'zq'. 
-#     """
-#     def __init__(self, num_emb, dimension, beta=0.25):
-#         super().__init__()
-#         self.code_book = nn.Parameter(torch.FloatTensor(num_emb, dimension).uniform_(-1/num_emb, 1/num_emb))
-#         self.beta = beta
+class VectorQuantizer(nn.Module):
+    """ VQ: converts continous latents 'ze' to discrete latents 'z' then maps 'z' to nearest embedding vectors 'zq'. 
+    """
+    def __init__(self, num_emb, dimension, beta=0.25):
+        super().__init__()
+        self.code_book = nn.Parameter(torch.FloatTensor(num_emb, dimension).uniform_(-1/num_emb, 1/num_emb))
+        self.beta = beta
 
-#     def forward(self, x):
-#         b, c, h, w = x.shape
-#         x_ = rearrange(x, 'b c h w -> (b h w) c')
+    def forward(self, x):
+        b, c, h, w = x.shape
+        x_ = rearrange(x, 'b c h w -> (b h w) c')
        
-#         # distance = z**2 + e**2 - 2 e * z
-#         sq = torch.sum(self.code_book**2, dim=-1)[None, :] + torch.sum(x_**2, dim=-1)[:, None]  # [b, k, c]
-#         dist = sq - 2*torch.einsum('bc, kc -> bk', x_, self.code_book)
+        # distance = z**2 + e**2 - 2 e * z
+        sq = torch.sum(self.code_book**2, dim=-1)[None, :] + torch.sum(x_**2, dim=-1)[:, None]  # [b, k, c]
+        dist = sq - 2*torch.einsum('bc, kc -> bk', x_, self.code_book)
 
-#         # get nearest embedding
-#         ids = torch.argmin(dist, dim=-1)
-#         ids = rearrange(ids, '(b h w) -> b h w', b=b, h=h, w=w)
-#         emb = self.code_book[ids]
-#         emb = emb.permute(0, 3, 1, 2)
+        # get nearest embedding
+        ids = torch.argmin(dist, dim=-1)
+        ids = rearrange(ids, '(b h w) -> b h w', b=b, h=h, w=w)
+        emb = self.code_book[ids]
+        emb = emb.permute(0, 3, 1, 2)
 
-#         dict_loss = F.mse_loss(x.detach(), emb)
-#         commitment_loss = self.beta*F.mse_loss(x, emb.detach())
-#         emb_loss = dict_loss + commitment_loss
+        dict_loss = F.mse_loss(x.detach(), emb)
+        commitment_loss = self.beta*F.mse_loss(x, emb.detach())
+        emb_loss = dict_loss + commitment_loss
 
-#         # straight-through gradient hack - https://discuss.pytorch.org/t/relu-with-leaky-derivative/32818/2  
-#         emb = x + (emb - x).detach()
+        # straight-through gradient hack - https://discuss.pytorch.org/t/relu-with-leaky-derivative/32818/2  
+        emb = x + (emb - x).detach()
         
-#         return ids, emb, emb_loss
+        return ids, emb, emb_loss
 
     
 # class VQVAE(nn.Module):
