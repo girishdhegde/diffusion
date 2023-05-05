@@ -284,7 +284,7 @@ def weights_init(m):
 
 
 class Discriminator(nn.Module):
-    """ PatchGAN discriminator as in Pix2Pix
+    """ PatchGAN Discriminator
     
     Refs:
         https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py
