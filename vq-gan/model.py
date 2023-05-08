@@ -355,7 +355,7 @@ class VectorQuantizer(nn.Module):
         return ids, emb, emb_loss
 
     
-class VQGAN(nn.Module):
+class VQGAN:
     def __init__(
         self, 
         in_ch=3, downsampling_factor=5, hidden_ch=256, num_emb=8*8*10,
@@ -363,7 +363,6 @@ class VQGAN(nn.Module):
         beta=0.25, lr=2e-4, device='cuda',
         ckpt=None, inference=False,
     ):
-        super().__init__()
         self.in_ch = in_ch
         self.downsampling_factor = downsampling_factor
         self.hidden_ch = hidden_ch
@@ -380,7 +379,9 @@ class VQGAN(nn.Module):
             self.dec = Decoder(in_ch, dim, dim_mults)
             self.disc = Discriminator(in_ch, dim, dim_mults).apply(weights_init)
             self.to(device)
-            self.opt = torch.optim.Adam(self.parameters(), lr=lr)
+            self.ae_params = list(self.enc.parameters()) + list(self.vq.parameters()) + list(self.dec.parameters())
+            self.opt_ae = torch.optim.Adam(self.ae_params, lr=lr)
+            self.opt_disc = torch.optim.Adam(self.disc.parameters(), lr=lr)
         else:
             self.load_ckpt(ckpt, inference)
 
@@ -390,8 +391,23 @@ class VQGAN(nn.Module):
         #     self.recon_loss = LPIPS().eval()
         #     self.recon_loss.to(device)
 
-    def non_discriminator_params(self):
-        return list(self.enc.parameters()) + list(self.vq.parameters()) + list(self.dec.parameters())
+    def to(self, *args, **kwargs):
+        self.enc.to(*args, **kwargs)
+        self.vq.to(*args, **kwargs)
+        self.dec.to(*args, **kwargs)
+        self.disc.to(*args, **kwargs)
+
+    def train(self, *args, **kwargs):
+        self.enc.train()
+        self.vq.train()
+        self.dec.train()
+        self.disc.train()
+
+    def eval(self, *args, **kwargs):
+        self.enc.eval()
+        self.vq.eval()
+        self.dec.eval()
+        self.disc.eval()
             
     def forward(self, x):
         real_lbl = torch.ones_like(lbl)
@@ -415,6 +431,26 @@ class VQGAN(nn.Module):
         disc_loss.backward()
 
         return (ze, z, zq, x_), loss, gan_loss, disc_loss
+    
+    def zero_grad(self, *args, **kwargs):
+        self.opt_ae.zero_grad(*args, **kwargs)
+        self.opt_disc.zero_grad(*args, **kwargs)
+
+    def optimize(self, gradient_clip=None, new_lr=None, *args, **kwargs):
+        if gradient_clip is not None:
+            nn.utils.clip_grad_norm_(self.opt_ae.parameters(), gradient_clip)
+            nn.utils.clip_grad_norm_(self.opt_disc.parameters(), gradient_clip)
+
+        if new_lr is not None:
+            for param_group in self.opt_ae.param_groups:
+                param_group['lr'] = new_lr
+
+            for param_group in self.opt_disc.param_groups:
+                param_group['lr'] = new_lr
+
+        self.opt_ae.step()
+        self.opt_disc.step()
+        self.zero_grad(*args, **kwargs)
 
 #     def get_config(self):
 #         cfg = {
@@ -458,16 +494,3 @@ class VQGAN(nn.Module):
 #         ckpt = self.get_ckpt()
 #         torch.save(ckpt, filename)
     
-#     def zero_grad(self, *args, **kwargs):
-#         self.opt.zero_grad(*args, **kwargs)
-
-#     def optimize(self, gradient_clip=None, new_lr=None, *args, **kwargs):
-#         if gradient_clip is not None:
-#             nn.utils.clip_grad_norm_(self.opt.parameters(), gradient_clip)
-
-#         if new_lr is not None:
-#             for param_group in self.opt.param_groups:
-#                 param_group['lr'] = new_lr
-
-#         self.opt.step()
-#         self.zero_grad(*args, **kwargs)
