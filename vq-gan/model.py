@@ -377,26 +377,41 @@ class VQGAN(nn.Module):
             self.enc = Encoder(in_ch, dim, dim_mults)
             self.vq  = VectorQuantizer(num_emb, hidden_ch, beta)
             self.dec = Decoder(in_ch, dim, dim_mults)
-            self.dis = Discriminator(in_ch, dim, dim_mults).apply(weights_init)
+            self.disc = Discriminator(in_ch, dim, dim_mults).apply(weights_init)
             self.to(device)
             self.opt = torch.optim.Adam(self.parameters(), lr=lr)
         else:
             self.load_ckpt(ckpt, inference)
 
         self.recon_loss = nn.MSELoss()
-        self.gan_loss = nn.BCELoss()
+        self.adv_loss = nn.BCELoss()
         # if perceptual_loss:
         #     self.recon_loss = LPIPS().eval()
         #     self.recon_loss.to(device)
-            
-#     def forward(self, x):
-#         ze = self.enc(x)
-#         z, zq, emb_loss = self.vq(ze)
-#         x_ = self.dec(zq)
 
-#         recon_loss = F.mse_loss(x, x_)
-#         loss = recon_loss + emb_loss
-#         return (ze, z, zq, x_), loss
+    def non_discriminator_params(self):
+        return list(self.enc.parameters()) + list(self.vq.parameters()) + list(self.dec.parameters())
+            
+    def forward(self, x):
+        real_lbl = torch.ones_like(lbl)
+        fake_lbl = torch.zeros_like(lbl)
+
+        ze = self.enc(x)
+        z, zq, emb_loss = self.vq(ze)
+        x_ = self.dec(zq)
+        lbl = self.disc(x_)
+
+        recon_loss = self.recon_loss(x, x_)
+        gan_loss = self.adv_loss(lbl, real_lbl).mean()
+        loss = recon_loss + emb_loss + gan_loss
+        loss.backward(inputs = non_disc_params)
+
+        real_loss = self.adv_loss(self.disc(x), real_lbl)
+        fake_loss = self.adv_loss(self.disc(x_.detach()), fake_lbl)
+        disc_loss = (real_loss + fake_loss)/2
+        disc_loss.backward()
+
+        return (ze, z, zq, x_), loss, gan_loss, disc_loss
 
 #     def get_config(self):
 #         cfg = {
