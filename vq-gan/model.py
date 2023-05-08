@@ -313,7 +313,8 @@ class Discriminator(nn.Module):
             nn.Conv2d(out_ch, out_ch, 3, 1, padding=1, bias=False),
             nn.BatchNorm2d(out_ch),
             nn.LeakyReLU(0.2, True),
-            nn.Conv2d(out_ch, 1, 1, 1)
+            nn.Conv2d(out_ch, 1, 1, 1), 
+            nn.Sigmoid(),
         ]
 
         self.layers = nn.Sequential(*layers)
@@ -404,6 +405,8 @@ class VQGAN(nn.Module):
         recon_loss = self.recon_loss(x, x_)
         gan_loss = self.adv_loss(lbl, real_lbl).mean()
         loss = recon_loss + emb_loss + gan_loss
+        # "inputs" arg is passed to stop grad accumulation on discriminator params
+        # https://discuss.pytorch.org/t/how-to-implement-gradient-accumulation-for-gan/112751
         loss.backward(inputs = non_disc_params)
 
         real_loss = self.adv_loss(self.disc(x), real_lbl)
