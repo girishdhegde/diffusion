@@ -5,9 +5,10 @@ import sys
 
 from tqdm import tqdm
 import torch
+from torch.utils.data import DataLoader
 
-from model import VQVAE
-from data import load_cifar, data_loaders
+from model import VQGAN
+from data import ImageSet
 from utils import set_seed, save_checkpoint, load_checkpoint, write_pred
 
 
@@ -22,10 +23,15 @@ if len(sys.argv) > 1: CFG = str(sys.argv[1])
 # =============================================================
 # model
 IN_CH = 3
-RES_LAYERS = 2
+DOWNSAMPLING_FACTOR = 5
 HIDDEN_CH = 256
-NUM_EMB = 8*8*10
+NUM_EMB = 8*8
+PERCEPTUAL_LOSS = True
 BETA = 0.25
+# dataset
+TRAIN_IMG_DIR = '../../landscapes_256/train'
+EVAL_IMG_DIR = '../../landscapes_256/test'
+EXT = '.png'
 # logging
 LOGDIR = Path('./data/runs')
 CKPT = LOGDIR/'ckpt.pt'  # or None
@@ -40,7 +46,7 @@ EVAL_ONLY = False  # if True, script exits right after the first eval
 SAVE_EVERY = False  # save unique checkpoint at every eval interval.
 GRADIENT_CLIP = None  # 5
 # adam optimizer
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 LR = 2e-4
 # system
 # dtype = 'bfloat16' # 'float32' or 'bfloat16'
@@ -61,28 +67,31 @@ if (CFG is not None) and Path(CFG).is_file():
 # =============================================================
 # Dataset, Dataloader init
 # =============================================================
-trainset, evalset = load_cifar()
-trainloader, evalloader = data_loaders(trainset, evalset, BATCH_SIZE)
+trainset, evalset = ImageSet(TRAIN_IMG_DIR, EXT), ImageSet(EVAL_IMG_DIR, EXT)
+trainloader = DataLoader(trainset, BATCH_SIZE, shuffle=True)
+evaloader = DataLoader(evalset, BATCH_SIZE, shuffle=True)
+
 # =============================================================
 # Load Checkpoint
 # =============================================================
-vqvae_ckpt, itr, best, kwargs = load_checkpoint(CKPT)
+net_ckpt, itr, best, kwargs = load_checkpoint(CKPT)
 
 # =============================================================
-# VQVAE(Model, Optimizer, Criterion) init and checkpoint load
+# VQGAN(Model, Optimizer, Criterion) init and checkpoint load
 # =============================================================
-vqvae = VQVAE(
-    IN_CH, RES_LAYERS, HIDDEN_CH, NUM_EMB, 
-    BETA, LR, DEVICE,
-    vqvae_ckpt, inference=False,
+vqgan = VQGAN(
+    IN_CH, DOWNSAMPLING_FACTOR, HIDDEN_CH, NUM_EMB, 
+    PERCEPTUAL_LOSS, BETA, LR, DEVICE,
+    net_ckpt, inference=False,
 )
 
 # =============================================================
 # Training loop - forward, backward, loss, optimize
 # =============================================================
 trainloss, valloss, log_trainloss = 0, 0, 0
-vqvae.train()
-vqvae.zero_grad(set_to_none=True)
+train_disc_loss, val_disc_loss, log_disc_loss = 0, 0, 0
+vqgan.train()
+vqgan.zero_grad(set_to_none=True)
 trainloader_, evalloader_ = iter(trainloader), iter(evalloader)
 print('Training ...')
 start_time = time.perf_counter()
@@ -92,46 +101,49 @@ for itr in range(itr, MAX_ITERS + 1):
     # =============================================================
     if (itr%EVAL_INTERVAL == 0) or EVAL_ONLY:
         print('Evaluating ...')
-        vqvae.eval()
+        vqgan.eval()
         valloss = 0
         with torch.no_grad():
             for _ in tqdm(range(EVAL_ITERS)):
-                try: data, lbl = next(evalloader_)
+                try: data = next(evalloader_)
                 except StopIteration:
                     evalloader_ = iter(evalloader)
-                    data, lbl = next(evalloader_)
+                    data = next(evalloader_)
                 data = data.to(DEVICE)
-                (ze, z, zq, pred), loss = vqvae.forward(data)
+                (ze, z, zq, pred, lbl), (recon_loss, emb_loss, gan_loss, loss), disc_loss = vqgan.forward(data, backward=False)
                 valloss += loss.item()
-        vqvae.train()
+                val_disc_loss += disc_loss.item()
+        vqgan.train()
 
-        valloss = valloss/EVAL_ITERS
-        trainloss = trainloss/EVAL_INTERVAL
+        valloss /= EVAL_ITERS
+        val_disc_loss /= EVAL_ITERS
+        trainloss /= EVAL_INTERVAL
+        train_disc_loss /= EVAL_INTERVAL
 
         # =============================================================
         # Saving and Logging
         # =============================================================
         if EVAL_ONLY:
-            log_data = f'val loss: {valloss}, \t time: {(end_time - start_time)/60}M'
+            log_data = f'val loss: {valloss}, \tval discriminator loss: {val_disc_loss}, \ttime: {(end_time - start_time)/60}M'
             print(f'{"-"*150}\n{log_data}\n{"-"*150}')
             break
 
         print('Saving checkpoint ...')
         ckpt_name = LOGDIR/'ckpt.pt' if not SAVE_EVERY else LOGDIR/f'ckpt_{itr}.pt'
         save_checkpoint(
-            vqvae.get_ckpt(), itr, valloss, trainloss, best, ckpt_name,
+            vqgan.get_ckpt(), itr, valloss, trainloss, best, ckpt_name, disc_loss=val_disc_loss,
         )
 
         if valloss < best:
             best = valloss
             save_checkpoint(
-                vqvae.get_ckpt(), itr, valloss, trainloss, best, LOGDIR/'best.pt',
+                vqgan.get_ckpt(), itr, valloss, trainloss, best, LOGDIR/'best.pt', disc_loss=val_disc_loss,
             )
         
-        write_pred(pred, LOGDIR/'predictions', str(itr), scale=2)
+        write_pred(pred[:10], LOGDIR/'predictions', str(itr))
 
         logfile = LOGDIR/'log.txt'
-        log_data = f"iteration: {itr}/{MAX_ITERS}, \tval loss: {valloss}, \ttrain loss: {trainloss}, \tbest loss: {best}"
+        log_data = f"iteration: {itr}/{MAX_ITERS}, \tval loss: {valloss, val_disc_loss}, \ttrain loss: {trainloss, train_disc_loss}, \tbest loss: {best}"
         with open(logfile, 'a' if logfile.is_file() else 'w') as fp:
             fp.write(log_data + '\n')
         end_time = time.perf_counter()
@@ -146,29 +158,32 @@ for itr in range(itr, MAX_ITERS + 1):
     # Training
     # =============================================================
     # forward, loss, backward with grad. accumulation
-    loss_ = 0
+    loss_, loss_disc_ = 0, 0
     for step in range(GRAD_ACC_STEPS):
-        try: data, lbl = next(trainloader_)
+        try: data = next(trainloader_)
         except StopIteration:
             trainloader_ = iter(trainloader)
-            data, lbl = next(trainloader_)
+            data = next(trainloader_)
         data = data.to(DEVICE)
-        (ze, z, zq, pred), loss = vqvae.forward(data)
-        loss.backward()
+        (ze, z, zq, pred, lbl), (recon_loss, emb_loss, gan_loss, loss), disc_loss = vqgan.forward(data)
         loss_ += loss.item()
+        loss_disc_ += disc_loss.item()
 
     # optimize params
-    loss_ = loss_/GRAD_ACC_STEPS
+    loss_ /= GRAD_ACC_STEPS
+    loss_disc_ /= GRAD_ACC_STEPS
     trainloss += loss_
     log_trainloss += loss_
-    vqvae.optimize(GRADIENT_CLIP, new_lr=None, set_to_none=True)
+    train_disc_loss += loss_
+    log_disc_loss += loss_disc_
+    vqgan.optimize(GRADIENT_CLIP, new_lr=None, set_to_none=True)
 
     # print info.
     if itr%PRINT_INTERVAL == 0:
-        log_data = f"iteration: {itr}/{MAX_ITERS}, \ttrain loss: {log_trainloss/PRINT_INTERVAL}"
+        log_data = f"iteration: {itr}/{MAX_ITERS}, \ttrain loss: {log_trainloss/PRINT_INTERVAL}, \tdisc loss: {log_disc_loss/PRINT_INTERVAL}"
         print(log_data)
         log_trainloss = 0
-
+        log_disc_loss = 0
 # =============================================================
 # END
 # =============================================================
