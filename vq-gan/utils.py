@@ -18,10 +18,10 @@ def set_seed(seed):
 
 
 def save_checkpoint(
-        vqvae, itr, val_loss, train_loss, best, filename, **kwargs,
+        net, itr, val_loss, train_loss, best, filename, **kwargs,
     ):
     ckpt = {
-        'vqvae': vqvae,
+        'net': net,
         'training':{
             'iteration':itr, 'val_loss':val_loss, 'train_loss':train_loss, 'best':best,
         },
@@ -33,22 +33,22 @@ def save_checkpoint(
 
 def load_checkpoint(filename):
     itr, best = 1, float('inf')
-    vqvae_ckpt, kwargs = None, None
+    net_ckpt, kwargs = None, None
     if filename is not None:
         if Path(filename).is_file():
             ckpt = torch.load(filename, map_location='cpu')
-            vqvae_ckpt = ckpt['vqvae']
+            net_ckpt = ckpt['net']
             if 'training' in ckpt:
                 itr, val_loss, train_loss, best = ckpt['training'].values()
                 print('Training parameters loaded successfully ...')
             if 'kwargs' in ckpt:
                 kwargs = ckpt['kwargs']
                 print('Additional kwargs loaded successfully ...')
-    return vqvae_ckpt, itr, best, kwargs
+    return net_ckpt, itr, best, kwargs
 
 
 @torch.no_grad()
-def write_pred(pred, outdir, name, scale=1):
+def write_pred(pred, outdir, name):
     outdir = Path(outdir)/name
     outdir.mkdir(exist_ok=True, parents=True)
     pred = pred.cpu().numpy().transpose(0, 2, 3, 1)
@@ -56,10 +56,5 @@ def write_pred(pred, outdir, name, scale=1):
     pred = (np.clip(pred, 0, 1)*255).astype(np.uint8)
     for i, img in enumerate(pred):
         filename = outdir/f'{i}.png'
-        img = cv2.resize(
-            img, 
-            (int(img.shape[1]*scale), int(img.shape[0]*scale)), 
-            interpolation=cv2.INTER_CUBIC,
-        )
         cv2.imwrite(str(filename), img[..., ::-1])
     return
