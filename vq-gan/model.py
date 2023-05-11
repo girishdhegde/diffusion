@@ -7,353 +7,6 @@ from einops.layers.torch import Rearrange
 from loss import LPIPS
 
 
-__author__ = "__Girish_Hegde__"
-
-
-def Upsample(dim, dim_out=None):
-    return nn.Sequential(
-        nn.Upsample(scale_factor=2, mode="nearest"),
-        nn.Conv2d(dim, dim_out or dim, 3, padding=1),
-    )
-
-
-def Downsample(dim, dim_out=None):
-    return nn.Sequential(
-        Rearrange("b c (h p1) (w p2) -> b (c p1 p2) h w", p1=2, p2=2),
-        nn.Conv2d(dim*4, dim_out or dim, 1),
-    )
-
-
-class ResBlock(nn.Module):
-    """ Residual Block: conv2(scale_shit(conv(x), linear(time_emb))) + x
-
-    Refs:
-        https://github.com/lucidrains/denoising-diffusion-pytorch
-        https://huggingface.co/blog/annotated-diffusion
-    """
-    def __init__(
-        self,
-        in_channels, out_channels,
-        groups=8,
-    ):
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1)
-        self.norm1 = nn.GroupNorm(groups, out_channels)
-        self.act1 = nn.SiLU()
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(out_channels, out_channels, 3, padding=1),
-            nn.GroupNorm(groups, out_channels),
-            nn.SiLU(),
-        )
-        self.shortcut = nn.Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else nn.Identity()
-
-    def forward(self, x):
-        """
-        Args:
-            x (torch.tenosr): [b, c, h, w] - input features.
-
-        Returns:
-            torch.tensor: [b, c_, h, w] - output features.
-        """
-        y = self.norm1(self.conv1(x))
-        y = self.conv2(self.act1(y))
-        return y + self.shortcut(x)
-
-
-class PreNorm(nn.Module):
-    """ https://github.com/lucidrains/denoising-diffusion-pytorch
-    """
-    def __init__(self, dim, fn):
-        super().__init__()
-        self.fn = fn
-        self.norm = nn.GroupNorm(1, dim)
-
-    def forward(self, x):
-        return self.fn(self.norm(x)) + x
-
-
-class Attention(nn.Module):
-    """ Multi Headed Scaled Dot-Product Attention.
-
-    Args:
-        in_channels (int): input feature channels.
-        emb_dim (int): dimension.
-        heads (int): number of heads. (dq = dk = dv = d = emb_dim/h).
-    """
-    def __init__(self, in_channels, emb_dim, heads=1):
-        super().__init__()
-        self.heads = heads
-        self.scale = (emb_dim//heads)**-0.5
-        self.to_qkv = nn.Linear(in_channels, 3*emb_dim, bias=False)
-        self.proj = nn.Linear(emb_dim, in_channels, bias=True)
-
-    def forward(self, x):
-        b, c, h, w = x.shape
-        x = rearrange(x, 'b c h w -> b h w c')
-        QKV = self.to_qkv(x)  # [b h w 3*emb_dim]
-        Q, K, V = QKV.chunk(3, dim=-1)  # [b h w emb_dim]
-        # [b, h, w, emb_dim] -> [b*heads, h*w, d_head]
-        Q, K, V = (rearrange(T, 'b h w (n d) -> (b n) (h w) d', n=self.heads, h=h) for T in (Q, K, V))
-        attn = torch.bmm(Q, K.permute(0, 2, 1))*self.scale  # [b*heads, h*w, h*w]
-        attn = F.softmax(attn, dim=-1)
-
-        out = torch.bmm(attn, V)  # [bs*heads, h*w, d_head]
-        out = rearrange(out, '(b n) (h w) d -> b h w (n d)', n=self.heads, h=h)  # [b, h, w, emb_dim]
-        out = rearrange(self.proj(out), 'b h w c -> b c h w')
-
-        return out
-
-
-class DownBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, groups, downsample=True):
-        super().__init__()
-        self.resize = downsample
-        self.conv = ResBlock(in_channels, out_channels, groups)
-        self.ds = Downsample(out_channels, out_channels) if downsample else nn.Identity()
-
-    def forward(self, x):
-        x = self.conv(x)
-        x = self.ds(x)
-        return x
-
-
-class AttnBlock(nn.Module):
-    def __init__(self, channels, groups=4):
-        super().__init__()
-        self.res_init = ResBlock(channels, channels, groups)
-        self.attn = PreNorm(channels, Attention(channels, channels, heads=8))
-        self.res_final = ResBlock(channels, channels, groups)
-
-    def forward(self, x):
-        x = self.res_final(self.attn(self.res_init(x)))
-        return x
-
-
-class UpBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, groups, upsample=True):
-        super().__init__()
-        self.resize = upsample
-        self.conv = ResBlock(in_channels, out_channels, groups)
-        self.us = Upsample(out_channels, out_channels) if upsample else nn.Identity()
-
-    def forward(self, x):
-        x = self.conv(x)
-        x = self.us(x)
-        return x
-
-
-class Encoder(nn.Module):
-    """ Encoder with Attention.
-
-    Args:
-        in_channels (int): input image channels.
-        dim (int): hidden layer channels.
-        dim_mults (tuple[int]): hidden channel layerwise multipliers.
-        n_blocks (int): no. of res blocks per stage.
-        groups (int): groupnorm num_groups.
-    """
-    def __init__(
-        self,
-        in_channels=3,
-        dim=8,
-        dim_mults=(2, 4, 8, 16, 32),
-        n_blocks=1,
-        groups=4,
-    ):
-        super().__init__()
-        assert dim%groups == 0, "dim must be divisible by groups"
-        self.in_channels = in_channels
-        self.out_channels = int(dim*dim_mults[-1])
-        self.dim = dim
-        self.dim_mults = dim_mults
-        self.n_blocks = n_blocks
-        self.groups = groups
-
-        self.init_conv = nn.Conv2d(in_channels, dim, 1)
-        self.attn_block = AttnBlock(self.out_channels, groups)
-        self.final_conv = nn.Sequential(
-            nn.GroupNorm(groups, self.out_channels), 
-            nn.SiLU(),
-            nn.Conv2d(self.out_channels, self.out_channels, 1)
-        )
-
-        dims = [dim, *(m*dim for m in dim_mults)]
-        n_resolutions = len(dim_mults)
-        self.downs = nn.ModuleList()
-
-        for i in range(n_resolutions):
-            in_ch, out_ch = dims[i], dims[i + 1]
-            for j in range(n_blocks):
-                ds = (j == (n_blocks - 1))
-                self.downs.append(
-                    DownBlock(in_ch, out_ch, groups, ds)
-                )
-                in_ch = out_ch
-
-    def forward(self, x):
-        """
-        Args:
-            x (torch.tensor): [b, in_channels, h, w] - batch input images.
-
-        Returns:
-            torch.tensor: [b, out_channels, h_, w_] - output tensor.
-        """
-        x = self.init_conv(x)
-
-        for layer in self.downs:
-            x = layer(x)
-
-        x = self.attn_block(x)
-        x = self.final_conv(x)
-
-        return x
-
-
-class Decoder(nn.Module):
-    """ Decoder with Attention.
-
-    Args:
-        out_channels (int): output image channels.
-        dim (int): hidden layer channels.
-        dim_mults (tuple[int]): hidden channel layerwise multipliers.
-        n_blocks (int): no. of res blocks per stage.
-        groups (int): groupnorm num_groups.
-    """
-    def __init__(
-        self,
-        out_channels=3,
-        dim=8,
-        dim_mults=(2, 4, 8, 16, 32),
-        n_blocks=1,
-        groups=4,
-    ):
-        super().__init__()
-        assert dim%groups == 0, "dim must be divisible by groups"
-        self.out_channels = out_channels
-        self.in_channels = int(dim*dim_mults[-1])
-        self.dim = dim
-        self.dim_mults = dim_mults
-        self.n_blocks = n_blocks
-        self.groups = groups
-
-        self.init_conv = nn.Conv2d(self.in_channels, self.in_channels, 1)
-        self.attn_block = AttnBlock(self.in_channels, groups)
-
-        dims = [dim, *(m*dim for m in dim_mults)]
-        n_resolutions = len(dim_mults)
-        self.ups = nn.ModuleList()
-
-        for i in range(n_resolutions - 1, -1, -1):
-            in_ch, out_ch = dims[i + 1], dims[i]
-            for j in range(n_blocks):
-                us = (j == (n_blocks - 1))
-                self.ups.append(
-                    UpBlock(in_ch, out_ch, groups, us)
-                )
-                in_ch = out_ch
-
-        self.final_conv = nn.Sequential(
-            nn.GroupNorm(groups, out_ch), 
-            nn.SiLU(),
-            nn.Conv2d(out_ch, self.out_channels, 1)
-        )
-
-    def forward(self, x):
-        """
-        Args:
-            x (torch.tensor): [b, in_channels, h, w] - batch input images.
-
-        Returns:
-            torch.tensor: [b, out_channels, h_, w_] - output tensor.
-        """
-        x = self.init_conv(x)
-        x = self.attn_block(x)
-
-        for layer in self.ups:
-            x = layer(x)
-
-        x = self.final_conv(x)
-        return x
-
-
-def weights_init(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        nn.init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
-        nn.init.normal_(m.weight.data, 1.0, 0.02)
-        nn.init.constant_(m.bias.data, 0)
-
-
-class Discriminator(nn.Module):
-    """ PatchGAN Discriminator
-    
-    Refs:
-        https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py
-        https://github.com/CompVis/taming-transformers/blob/master/taming/modules/discriminator/model.py
-    """
-    def __init__(self, in_channels=3, dim=8, dim_mults=(2, 4, 8, 16, 32)):
-
-        super().__init__()
-        layers = [nn.Conv2d(in_channels, dim, 1), nn.LeakyReLU(0.2, True)]
-        
-        dims = [dim, *(m*dim for m in dim_mults)]
-        n_resolutions = len(dim_mults)
-
-        for i in range(n_resolutions):
-            in_ch, out_ch = dims[i], dims[i + 1]
-            layers += [
-                nn.Conv2d(in_ch, out_ch, 4, 2, padding=1, bias=False),
-                nn.BatchNorm2d(out_ch),
-                nn.LeakyReLU(0.2, True),
-            ]
-            in_ch = out_ch
-
-        layers += [
-            nn.Conv2d(out_ch, out_ch, 3, 1, padding=1, bias=False),
-            nn.BatchNorm2d(out_ch),
-            nn.LeakyReLU(0.2, True),
-            nn.Conv2d(out_ch, 1, 1, 1), 
-            nn.Sigmoid(),
-        ]
-
-        self.layers = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.layers(x)
-
-
-class VectorQuantizer(nn.Module):
-    """ VQ: converts continous latents 'ze' to discrete latents 'z' then maps 'z' to nearest embedding vectors 'zq'. 
-    """
-    def __init__(self, num_emb, dimension, beta=0.25):
-        super().__init__()
-        self.code_book = nn.Parameter(torch.FloatTensor(num_emb, dimension).uniform_(-1/num_emb, 1/num_emb))
-        self.beta = beta
-
-    def forward(self, x):
-        b, c, h, w = x.shape
-        x_ = rearrange(x, 'b c h w -> (b h w) c')
-       
-        # distance = z**2 + e**2 - 2 e * z
-        sq = torch.sum(self.code_book**2, dim=-1)[None, :] + torch.sum(x_**2, dim=-1)[:, None]  # [b, k, c]
-        dist = sq - 2*torch.einsum('bc, kc -> bk', x_, self.code_book)
-
-        # get nearest embedding
-        ids = torch.argmin(dist, dim=-1)
-        ids = rearrange(ids, '(b h w) -> b h w', b=b, h=h, w=w)
-        emb = self.code_book[ids]
-        emb = emb.permute(0, 3, 1, 2)
-
-        dict_loss = F.mse_loss(x.detach(), emb)
-        commitment_loss = self.beta*F.mse_loss(x, emb.detach())
-        emb_loss = dict_loss + commitment_loss
-
-        # straight-through gradient hack - https://discuss.pytorch.org/t/relu-with-leaky-derivative/32818/2  
-        emb = x + (emb - x).detach()
-        
-        return ids, emb, emb_loss
-
     
 class VQGAN:
     def __init__(
@@ -387,9 +40,21 @@ class VQGAN:
 
         self.recon_loss = nn.MSELoss()
         self.adv_loss = nn.BCELoss()
-        # if perceptual_loss:
-        #     self.recon_loss = LPIPS().eval()
-        #     self.recon_loss.to(device)
+        if perceptual_loss:
+            self.recon_loss = LPIPS().eval()
+            self.recon_loss.to(device)
+
+    @property
+    def n_ae_params(self):
+        return sum(p.numel() for p in self.ae_params)
+
+    @property
+    def n_disc_params(self):
+        return sum(p.numel() for p in self.disc.parameters())
+
+    @property
+    def n_params(self):
+        return self.n_ae_params + self.n_disc_params
 
     def to(self, *args, **kwargs):
         self.enc.to(*args, **kwargs)
@@ -410,27 +75,29 @@ class VQGAN:
         self.disc.eval()
             
     def forward(self, x):
-        real_lbl = torch.ones_like(lbl)
-        fake_lbl = torch.zeros_like(lbl)
 
         ze = self.enc(x)
         z, zq, emb_loss = self.vq(ze)
         x_ = self.dec(zq)
         lbl = self.disc(x_)
 
+        real_lbl = torch.ones_like(lbl)
+        fake_lbl = torch.zeros_like(lbl)
+        
         recon_loss = self.recon_loss(x, x_)
+        if self.perceptual_loss: recon_loss = recon_loss.mean()
         gan_loss = self.adv_loss(lbl, real_lbl).mean()
         loss = recon_loss + emb_loss + gan_loss
         # "inputs" arg is passed to stop grad accumulation on discriminator params
         # https://discuss.pytorch.org/t/how-to-implement-gradient-accumulation-for-gan/112751
-        loss.backward(inputs = non_disc_params)
+        loss.backward(inputs=self.ae_params)
 
         real_loss = self.adv_loss(self.disc(x), real_lbl)
         fake_loss = self.adv_loss(self.disc(x_.detach()), fake_lbl)
         disc_loss = (real_loss + fake_loss)/2
         disc_loss.backward()
 
-        return (ze, z, zq, x_), loss, gan_loss, disc_loss
+        return (ze, z, zq, x_, lbl), (recon_loss, emb_loss, gan_loss, loss), disc_loss
     
     def zero_grad(self, *args, **kwargs):
         self.opt_ae.zero_grad(*args, **kwargs)
@@ -438,8 +105,8 @@ class VQGAN:
 
     def optimize(self, gradient_clip=None, new_lr=None, *args, **kwargs):
         if gradient_clip is not None:
-            nn.utils.clip_grad_norm_(self.opt_ae.parameters(), gradient_clip)
-            nn.utils.clip_grad_norm_(self.opt_disc.parameters(), gradient_clip)
+            nn.utils.clip_grad_norm_(self.ae_params, gradient_clip)
+            nn.utils.clip_grad_norm_(self.disc.parameters(), gradient_clip)
 
         if new_lr is not None:
             for param_group in self.opt_ae.param_groups:
