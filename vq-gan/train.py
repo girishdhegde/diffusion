@@ -23,9 +23,9 @@ if len(sys.argv) > 1: CFG = str(sys.argv[1])
 # =============================================================
 # model
 IN_CH = 3
-DOWNSAMPLING_FACTOR = 5
+DOWNSAMPLING_FACTOR = 4
 HIDDEN_CH = 256
-NUM_EMB = 8*8
+NUM_EMB = 1024
 PERCEPTUAL_LOSS = True
 BETA = 0.25
 # dataset
@@ -33,11 +33,11 @@ TRAIN_IMG_DIR = '../../landscapes_256/train'
 EVAL_IMG_DIR = '../../landscapes_256/test'
 EXT = '.png'
 # logging
-LOGDIR = Path('./data/runs')
+LOGDIR = Path('./data/runs_dw_4')
 CKPT = LOGDIR/'ckpt.pt'  # or None
 PRINT_INTERVAL = 10
 # training
-GRAD_ACC_STEPS = 1  # used to simulate larger batch sizes
+GRAD_ACC_STEPS = 4  # used to simulate larger batch sizes
 MAX_ITERS = 100_000
 
 EVAL_INTERVAL = 500
@@ -46,7 +46,7 @@ EVAL_ONLY = False  # if True, script exits right after the first eval
 SAVE_EVERY = False  # save unique checkpoint at every eval interval.
 GRADIENT_CLIP = None  # 5
 # adam optimizer
-BATCH_SIZE = 32
+BATCH_SIZE = 8
 LR = 2e-4
 # system
 # dtype = 'bfloat16' # 'float32' or 'bfloat16'
@@ -69,7 +69,7 @@ if (CFG is not None) and Path(CFG).is_file():
 # =============================================================
 trainset, evalset = ImageSet(TRAIN_IMG_DIR, EXT), ImageSet(EVAL_IMG_DIR, EXT)
 trainloader = DataLoader(trainset, BATCH_SIZE, shuffle=True)
-evaloader = DataLoader(evalset, BATCH_SIZE, shuffle=True)
+evalloader = DataLoader(evalset, BATCH_SIZE, shuffle=True)
 
 # =============================================================
 # Load Checkpoint
@@ -174,7 +174,7 @@ for itr in range(itr, MAX_ITERS + 1):
     loss_disc_ /= GRAD_ACC_STEPS
     trainloss += loss_
     log_trainloss += loss_
-    train_disc_loss += loss_
+    train_disc_loss += loss_disc_
     log_disc_loss += loss_disc_
     vqgan.optimize(GRADIENT_CLIP, new_lr=None, set_to_none=True)
 
