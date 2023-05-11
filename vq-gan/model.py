@@ -372,7 +372,7 @@ class VQGAN:
         self.lr = lr
         self.device = device
         if ckpt is None:
-            dim = hidden_ch//(w**downsampling_factor)
+            dim = hidden_ch//(2**downsampling_factor)
             dim_mults = tuple(2**i for i in range(1, downsampling_factor + 1))
             self.enc = Encoder(in_ch, dim, dim_mults)
             self.vq  = VectorQuantizer(num_emb, hidden_ch, beta)
@@ -383,7 +383,7 @@ class VQGAN:
             self.opt_ae = torch.optim.Adam(self.ae_params, lr=lr)
             self.opt_disc = torch.optim.Adam(self.disc.parameters(), lr=lr)
         else:
-            self.load_ckpt(ckpt, inference)
+            self.load_ckpt(ckpt, device, inference)
 
         self.recon_loss = nn.MSELoss()
         self.adv_loss = nn.BCELoss()
@@ -452,45 +452,56 @@ class VQGAN:
         self.opt_disc.step()
         self.zero_grad(*args, **kwargs)
 
-#     def get_config(self):
-#         cfg = {
-#             'in_ch':self.in_ch, 'res_layers':self.res_layers, 'hidden_ch':self.hidden_ch, 'num_emb':self.num_emb, 
-#             'beta':self.beta, 'lr':self.lr, 
-#         }
-#         return cfg
+    def get_config(self):
+        cfg = {
+            'in_ch': self.in_ch, 'downsampling_factor': self.downsampling_factor, 
+            'hidden_ch': self.hidden_ch, 'num_emb': self.num_emb,
+            'beta':self. beta, 'lr': self.lr,
+        }
+        return cfg
 
-#     def get_ckpt(self):
-#         ckpt = {
-#             'net':{
-#                 'config': self.get_config(),
-#                 'encoder': self.enc.state_dict(),
-#                 'vector_quantizer': self.vq.state_dict(),
-#                 'decoder': self.dec.state_dict(),
-#             },
-#             'optimizer': self.opt.state_dict(),
-#         }
-#         return ckpt
+    def get_ckpt(self):
+        ckpt = {
+            'net':{
+                'config': self.get_config(),
+                'encoder': self.enc.state_dict(),
+                'vector_quantizer': self.vq.state_dict(),
+                'decoder': self.dec.state_dict(),
+                'discriminator': self.disc.state_dict(),
+            },
+            'optimizer': {
+                'AE': self.opt_ae.state_dict(),
+                'discriminator': self.opt_disc.state_dict(),
+            }
+        }
+        return ckpt
 
-#     def load_ckpt(self, ckpt, inference=False):
-#         if not isinstance(ckpt, dict): ckpt = torch.load(ckpt, map_location='cpu')
-#         config, enc, vq, dec = ckpt['net'].values()
-#         for k, v in config.items():
-#             setattr(self, k, v)
-#         self.enc = Encoder(self.in_ch, self.res_layers, self.hidden_ch)
-#         self.vq  = VectorQuantizer(self.num_emb, self.hidden_ch, self.beta)
-#         self.dec = Decoder(self.in_ch, self.res_layers, self.hidden_ch)
-#         self.enc.load_state_dict(enc)
-#         self.vq.load_state_dict(vq)
-#         self.dec.load_state_dict(dec)
-#         self.to(self.device)
-#         print(f'Model loaded successfully ...')
+    def load_ckpt(self, ckpt, device='cpu', inference=False):
+        if not isinstance(ckpt, dict): ckpt = torch.load(ckpt, map_location='cpu')
+        config, enc, vq, dec, disc = ckpt['net'].values()
+        for k, v in config.items():
+            setattr(self, k, v)
+        dim = self.hidden_ch//(2**self.downsampling_factor)
+        dim_mults = tuple(2**i for i in range(1, self.downsampling_factor + 1))
+        self.enc = Encoder(self.in_ch, dim, dim_mults)
+        self.vq  = VectorQuantizer(self.num_emb, self.hidden_ch, self.beta)
+        self.dec = Decoder(self.in_ch, dim, dim_mults)
+        self.disc = Discriminator(self.in_ch, dim, dim_mults).apply(weights_init)
+        self.enc.load_state_dict(enc)
+        self.vq.load_state_dict(vq)
+        self.dec.load_state_dict(dec)
+        self.disc.load_state_dict(disc)
+        self.to(device)
+        self.ae_params = list(self.enc.parameters()) + list(self.vq.parameters()) + list(self.dec.parameters())
+        print(f'Model loaded successfully ...')
+        
+        if (not inference) and ('optimizer' in ckpt):
+            self.opt_ae = torch.optim.Adam(self.ae_params, lr=self.lr)
+            self.opt_disc = torch.optim.Adam(self.disc.parameters(), lr=self.lr)
+            self.opt_ae.load_state_dict(ckpt['optimizer']['AE'])
+            self.opt_disc.load_state_dict(ckpt['optimizer']['discriminator'])
+            print(f'Optimizer loaded successfully ...')
 
-#         if (not inference) and ('optimizer' in ckpt):
-#             self.opt = torch.optim.Adam(self.parameters(), lr=1e-1)
-#             self.opt.load_state_dict(ckpt['optimizer'])
-#             print(f'Optimizer loaded successfully ...')
-
-#     def save_ckpt(self, filename):
-#         ckpt = self.get_ckpt()
-#         torch.save(ckpt, filename)
-    
+    def save_ckpt(self, filename):
+        ckpt = self.get_ckpt()
+        torch.save(ckpt, filename)
