@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from model import VQGAN
 from data import ImageSet, load_cifar, data_loaders
-from utils import set_seed, save_checkpoint, load_checkpoint, write_pred
+from utils import set_seed, save_checkpoint, load_checkpoint, write_pred, LossManager
 
 
 __author__ = "__Girish_Hegde__"
@@ -32,7 +32,7 @@ NUM_EMB = 256
 # NUM_EMB = 8*8*10
 
 PERCEPTUAL_LOSS = False
-BETA = 1.0
+BETA = 0.75
 # dataset
 TRAIN_IMG_DIR = '../../landscapes_256/train'
 EVAL_IMG_DIR = '../../landscapes_256/test'
@@ -99,8 +99,13 @@ vqgan = VQGAN(
 # =============================================================
 # Training loop - forward, backward, loss, optimize
 # =============================================================
-trainloss, valloss, log_trainloss = 0, 0, 0
-train_disc_loss, val_disc_loss, log_disc_loss = 0, 0, 0
+loss_manager = LossManager(
+    'train_loss', 'val_loss', 'log_loss', 
+    'train_recon_loss', 'val_recon_loss', 'log_recon_loss', 
+    'train_disc_loss', 'val_disc_loss', 'log_disc_loss',
+    metric='val_recon_loss',
+    best=best,
+)
 vqgan.train()
 vqgan.zero_grad(set_to_none=True)
 trainloader_, evalloader_ = iter(trainloader), iter(evalloader)
@@ -113,7 +118,6 @@ for itr in range(itr, MAX_ITERS + 1):
     if (itr%EVAL_INTERVAL == 0) or EVAL_ONLY:
         print('Evaluating ...')
         vqgan.eval()
-        valloss = 0
         with torch.no_grad():
             for _ in tqdm(range(EVAL_ITERS)):
                 try: data = next(evalloader_)
@@ -122,46 +126,51 @@ for itr in range(itr, MAX_ITERS + 1):
                     data = next(evalloader_)
                 data = data.to(DEVICE)
                 (ze, z, zq, pred, lbl), (recon_loss, emb_loss, gan_loss, loss), disc_loss = vqgan.forward(data, backward=False)
-                valloss += loss.item()
-                val_disc_loss += disc_loss.item()
+                loss_manager.accumulate(
+                    val_loss = loss.item(), val_recon_loss = recon_loss.item(), val_disc_loss = disc_loss.item(), 
+                )
         vqgan.train()
 
-        valloss /= EVAL_ITERS
-        val_disc_loss /= EVAL_ITERS
-        trainloss /= EVAL_INTERVAL
-        train_disc_loss /= EVAL_INTERVAL
-
+        loss_manager.average(
+            'val_loss', 'val_recon_loss', 'val_disc_loss', 
+            'train_loss', 'train_recon_loss', 'train_disc_loss'
+        )
         # =============================================================
         # Saving and Logging
         # =============================================================
         if EVAL_ONLY:
-            log_data = f'val loss: {valloss}, \tval discriminator loss: {val_disc_loss}, \ttime: {(end_time - start_time)/60}M'
+            log_data = loss_manager.get_str('val_loss', 'val_recon_loss', 'val_disc_loss') + f'\ttime: {(end_time - start_time)/60}M'
             print(f'{"-"*150}\n{log_data}\n{"-"*150}')
             break
 
         print('Saving checkpoint ...')
         ckpt_name = LOGDIR/'ckpt.pt' if not SAVE_EVERY else LOGDIR/f'ckpt_{itr}.pt'
         save_checkpoint(
-            vqgan.get_ckpt(), itr, valloss, trainloss, best, ckpt_name, disc_loss=val_disc_loss,
+            vqgan.get_ckpt(), itr, 
+            loss_manager.losses['val_recon_loss'], loss_manager.losses['train_recon_loss'], loss_manager.best, 
+            ckpt_name, 
+            disc_loss = loss_manager.losses['val_disc_loss'],
         )
 
-        if valloss < best:
-            best = valloss
+        if loss_manager.update_best():
             save_checkpoint(
-                vqgan.get_ckpt(), itr, valloss, trainloss, best, LOGDIR/'best.pt', disc_loss=val_disc_loss,
+                vqgan.get_ckpt(), itr, 
+                loss_manager.losses['val_recon_loss'], loss_manager.losses['train_recon_loss'], loss_manager.best, 
+                LOGDIR/'best.pt', 
+                disc_loss = loss_manager.losses['val_disc_loss'],
             )
         
         write_pred(pred[:10], LOGDIR/'predictions', str(itr))
 
         logfile = LOGDIR/'log.txt'
-        log_data = f"iteration: {itr}/{MAX_ITERS}, \tval loss: {valloss, val_disc_loss}, \ttrain loss: {trainloss, train_disc_loss}, \tbest loss: {best}"
+        loss_str = loss_manager.get_str('val_loss', 'val_recon_loss', 'val_disc_loss', 'train_loss', 'train_recon_loss', 'train_disc_loss', spacer=' ')
+        log_data = f"iteration: {itr}/{MAX_ITERS}, \t{loss_str} \tbest: {loss_manager.best}"
         with open(logfile, 'a' if logfile.is_file() else 'w') as fp:
             fp.write(log_data + '\n')
         end_time = time.perf_counter()
-        log_data = f'{log_data}, \t time: {(end_time - start_time)/60}M'
+        log_data = f'{log_data}, \ttime: {(end_time - start_time)/60}M'
         print(f'{"-"*150}\n{log_data}\n{"-"*150}')
 
-        trainloss = 0
         start_time = time.perf_counter()
         print('Training ...')
 
@@ -169,7 +178,6 @@ for itr in range(itr, MAX_ITERS + 1):
     # Training
     # =============================================================
     # forward, loss, backward with grad. accumulation
-    loss_, loss_disc_ = 0, 0
     for step in range(GRAD_ACC_STEPS):
         try: data = next(trainloader_)
         except StopIteration:
@@ -177,24 +185,19 @@ for itr in range(itr, MAX_ITERS + 1):
             data = next(trainloader_)
         data = data.to(DEVICE)
         (ze, z, zq, pred, lbl), (recon_loss, emb_loss, gan_loss, loss), disc_loss = vqgan.forward(data)
-        loss_ += loss.item()
-        loss_disc_ += disc_loss.item()
+        loss_manager.accumulate(
+            train_loss = loss.item(), train_recon_loss = recon_loss.item(), train_disc_loss = disc_loss.item(), 
+            log_loss = loss.item(), log_recon_loss = recon_loss.item(), log_disc_loss = disc_loss.item(), 
+        )
 
     # optimize params
-    loss_ /= GRAD_ACC_STEPS
-    loss_disc_ /= GRAD_ACC_STEPS
-    trainloss += loss_
-    log_trainloss += loss_
-    train_disc_loss += loss_disc_
-    log_disc_loss += loss_disc_
     vqgan.optimize(GRADIENT_CLIP, new_lr=None, set_to_none=True)
 
     # print info.
     if itr%PRINT_INTERVAL == 0:
-        log_data = f"iteration: {itr}/{MAX_ITERS}, \ttrain loss: {log_trainloss/PRINT_INTERVAL}, \tdisc loss: {log_disc_loss/PRINT_INTERVAL}"
+        loss, recon_loss, disc_loss = loss_manager.average('log_loss', 'log_recon_loss', 'log_disc_loss')
+        log_data = f"itr: {itr}/{MAX_ITERS}, \ttrain_loss: {loss}, \trecon_loss: {recon_loss}, \tdisc_loss: {disc_loss}"
         print(log_data)
-        log_trainloss = 0
-        log_disc_loss = 0
 # =============================================================
 # END
 # =============================================================
