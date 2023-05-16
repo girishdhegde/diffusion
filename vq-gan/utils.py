@@ -58,3 +58,39 @@ def write_pred(pred, outdir, name):
         filename = outdir/f'{i}.png'
         cv2.imwrite(str(filename), img[..., ::-1])
     return
+
+    
+class LossManager:
+    def __init__(self, names, metric=None, best=float('inf')):
+        self.accumulator = {name: 0. for name in names}
+        self.losses = {name: 0. for name in names}
+        self.steps = {name: 0 for name in names}
+        self.metric = metric if metric is not None else names[0]
+        self.best = best
+
+    def accumulate(self, steps=1, **kwargs):
+        for k, v in kwargs.items():
+            self.accumulator[k] += v
+            self.steps[k] += 1
+
+    def average(self, *args, clear=True):
+        for k in args:
+            self.losses[k] = self.accumulator[k]/self.steps[k]
+            if clear:
+                self.accumulator[k] = 0.
+                self.steps[k] = 0
+    
+    def update_best(self):
+        if self.losses[self.metric] < self.best:
+            self.best = self.losses[self.metric]
+            return True
+        return False
+
+    def get_str(self, *args):
+        return '\t'.join(f'{k} = {self.losses[k]:.6f},' for k in args)
+
+    def __str__(self):
+        return '\t'.join(f'{k} = {v:.6f},' for k, v in self.losses.items()) + f'\tbest = {self.best:.6f}'
+
+    def __repr__(self):
+        return self.__str__()

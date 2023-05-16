@@ -199,7 +199,7 @@ class Encoder(nn.Module):
             torch.tensor: [b, out_channels, h_, w_] - output tensor.
         """
         x = self.init_conv(x)
-
+        
         for layer in self.downs:
             x = layer(x)
 
@@ -323,6 +323,84 @@ class Discriminator(nn.Module):
         return self.layers(x)
 
 
+# class ResBlock(nn.Module):
+#     def __init__(self, ch):
+#         super().__init__()
+#         self.layers = nn.Sequential(
+#             nn.ReLU(),
+#             nn.Conv2d(ch, ch, 3, 1, padding=1),
+#             nn.ReLU(),
+#             nn.Conv2d(ch, ch, 1, 1),
+#         )
+
+#     def forward(self, x):
+#         return x + self.layers(x)
+
+
+# class Encoder(nn.Module):
+#     """ Encoder: maps data 'x' to continous latent vectors 'ze'.
+#     """
+#     def __init__(self, in_ch=3, res_layers=2, hidden_ch=256, ):
+#         super().__init__()
+#         self.layers = nn.Sequential(
+#             nn.Conv2d(in_ch, hidden_ch // 2, 4, 2, padding=1),
+#             nn.ReLU(),
+#             nn.Conv2d(hidden_ch // 2, hidden_ch, 4, 2, padding=1),
+#             nn.ReLU(),
+#             *(ResBlock(hidden_ch) for _ in range(res_layers)),
+#         )
+
+#     def forward(self, x):
+#         return self.layers(x)
+
+
+# class Decoder(nn.Module):
+#     """ Encoder: maps nearest embedding vectors 'zq' to data/output 'x'.
+#     """
+#     def __init__(self, in_ch=3, res_layers=2, hidden_ch=256, ):
+#         super().__init__()
+#         self.layers = nn.Sequential(
+#             *(ResBlock(hidden_ch) for _ in range(res_layers)),
+#             nn.ReLU(),
+#             nn.Upsample(scale_factor=2, mode='bilinear'),
+#             nn.Conv2d(hidden_ch, hidden_ch, 3, 1, padding=1),
+#             nn.ReLU(),
+#             nn.Upsample(scale_factor=2, mode='bilinear'),
+#             nn.Conv2d(hidden_ch, hidden_ch, 3, 1, padding=1),
+#             nn.ReLU(),
+#             nn.Conv2d(hidden_ch, in_ch, 1, 1),
+#         )
+
+#     def forward(self, x):
+#         return self.layers(x)
+
+
+# class Discriminator(nn.Module):
+#     def __init__(self, *args, **kwargs):
+#         super().__init__()
+#         nc, ndf = 3, 64
+#         self.layers = nn.Sequential(
+#             # input is (nc) x 64 x 64
+#             nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+#             nn.LeakyReLU(0.2, inplace=True),
+#             # state size. (ndf) x 32 x 32
+#             nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+#             nn.BatchNorm2d(ndf * 2),
+#             nn.LeakyReLU(0.2, inplace=True),
+#             # state size. (ndf*2) x 16 x 16
+#             nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+#             nn.BatchNorm2d(ndf * 4),
+#             nn.LeakyReLU(0.2, inplace=True),
+#             # state size. (ndf*4) x 8 x 8
+#             nn.Conv2d(ndf * 4, 1, 4, 1, 0, bias=False),
+#             nn.Sigmoid(),
+#         )
+
+#     def forward(self, x):
+#         y = self.layers(x)
+#         return y.view(-1)
+
+
 class VectorQuantizer(nn.Module):
     """ VQ: converts continous latents 'ze' to discrete latents 'z' then maps 'z' to nearest embedding vectors 'zq'. 
     """
@@ -386,12 +464,44 @@ class VQGAN:
             self.opt_disc = torch.optim.Adam(self.disc.parameters(), lr=lr)
         else:
             self.load_ckpt(ckpt, device, inference)
-
+        
         self.recon_loss = nn.MSELoss()
         self.adv_loss = nn.BCELoss()
         if perceptual_loss:
             self.recon_loss = LPIPS().eval()
             self.recon_loss.to(device)
+
+    # def __init__(
+    #     self, 
+    #     in_ch=3, res_layers=2, hidden_ch=256, num_emb=8*8*10, 
+    #     perceptual_loss=True,
+    #     beta=0.25, lr=2e-4, device='cuda',
+    #     ckpt=None, inference=False,
+    # ):
+    #     super().__init__()
+    #     self.in_ch = in_ch
+    #     self.res_layers = res_layers
+    #     self.hidden_ch = hidden_ch
+    #     self.num_emb = num_emb
+    #     self.beta = beta
+    #     self.lr = lr
+    #     self.device = device
+    #     self.perceptual_loss = perceptual_loss
+        
+    #     if ckpt is None:
+    #         self.enc = Encoder(in_ch, res_layers, hidden_ch)
+    #         self.vq  = VectorQuantizer(num_emb, hidden_ch, beta)
+    #         self.dec = Decoder(in_ch, res_layers, hidden_ch)
+    #         self.disc = Discriminator().apply(weights_init)
+    #         self.to(device)
+    #         self.ae_params = list(self.enc.parameters()) + list(self.vq.parameters()) + list(self.dec.parameters())
+    #         self.opt_ae = torch.optim.Adam(self.ae_params, lr=lr)
+    #         self.opt_disc = torch.optim.Adam(self.disc.parameters(), lr=lr)
+    #     else:
+    #         self.load_ckpt(ckpt, device, inference)
+
+    #     self.recon_loss = nn.MSELoss()
+    #     self.adv_loss = nn.BCELoss()
 
     @property
     def n_ae_params(self):
@@ -422,7 +532,19 @@ class VQGAN:
         self.vq.eval()
         self.dec.eval()
         self.disc.eval()
-            
+    
+    def get_last_layer(self):
+        return self.dec.final_conv[-1].weight
+
+    # https://github.com/CompVis/taming-transformers/blob/master/taming/modules/losses/vqperceptual.py
+    def calculate_adaptive_weight(self, rec_loss, gan_loss, last_layer):
+        nll_grads = torch.autograd.grad(rec_loss, last_layer, retain_graph=True)[0]
+        g_grads = torch.autograd.grad(gan_loss, last_layer, retain_graph=True)[0]
+
+        d_weight = torch.norm(nll_grads) / (torch.norm(g_grads) + 1e-4)
+        d_weight = torch.clamp(d_weight, 0.0, 1e4).detach()
+        return d_weight
+
     def forward(self, x, calculate_loss=True, backward=True):
 
         ze = self.enc(x)
@@ -437,8 +559,9 @@ class VQGAN:
             
             recon_loss = self.recon_loss(x, x_)
             if self.perceptual_loss: recon_loss = recon_loss.mean()
-            gan_loss = self.adv_loss(lbl, real_lbl).mean()
-            loss = recon_loss + emb_loss + gan_loss
+            gan_loss = self.adv_loss(lbl, real_lbl)
+            weight = self.calculate_adaptive_weight(recon_loss, gan_loss, self.get_last_layer()) if backward else 0.
+            loss = recon_loss + emb_loss + weight*gan_loss
             # "inputs" arg is passed to stop grad accumulation on discriminator params
             # https://discuss.pytorch.org/t/how-to-implement-gradient-accumulation-for-gan/112751
             if backward: loss.backward(inputs=self.ae_params)
@@ -447,7 +570,7 @@ class VQGAN:
             fake_loss = self.adv_loss(self.disc(x_.detach()), fake_lbl)
             disc_loss = (real_loss + fake_loss)/2
             if backward: disc_loss.backward()
-
+            
         return (ze, z, zq, x_, lbl), (recon_loss, emb_loss, gan_loss, loss), disc_loss
     
     def zero_grad(self, *args, **kwargs):
@@ -469,6 +592,13 @@ class VQGAN:
         self.opt_ae.step()
         self.opt_disc.step()
         self.zero_grad(*args, **kwargs)
+
+    # def get_config(self):
+    #     cfg = {
+    #         'in_ch':self.in_ch, 'res_layers':self.res_layers, 'hidden_ch':self.hidden_ch, 'num_emb':self.num_emb, 
+    #         'beta':self. beta, 'lr': self.lr,
+    #     }
+    #     return cfg
 
     def get_config(self):
         cfg = {

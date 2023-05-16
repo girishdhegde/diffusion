@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from model import VQGAN
-from data import ImageSet
+from data import ImageSet, load_cifar, data_loaders
 from utils import set_seed, save_checkpoint, load_checkpoint, write_pred
 
 
@@ -24,20 +24,25 @@ if len(sys.argv) > 1: CFG = str(sys.argv[1])
 # model
 IN_CH = 3
 DOWNSAMPLING_FACTOR = 4
-HIDDEN_CH = 256
-NUM_EMB = 1024
-PERCEPTUAL_LOSS = True
-BETA = 0.25
+HIDDEN_CH = 128
+NUM_EMB = 256
+# IN_CH = 3
+# RES_LAYERS = 2
+# HIDDEN_CH = 256
+# NUM_EMB = 8*8*10
+
+PERCEPTUAL_LOSS = False
+BETA = 1.0
 # dataset
 TRAIN_IMG_DIR = '../../landscapes_256/train'
 EVAL_IMG_DIR = '../../landscapes_256/test'
 EXT = '.png'
 # logging
-LOGDIR = Path('./data/runs_dw_4')
+LOGDIR = Path('./data/runs_128')
 CKPT = LOGDIR/'ckpt.pt'  # or None
 PRINT_INTERVAL = 10
 # training
-GRAD_ACC_STEPS = 4  # used to simulate larger batch sizes
+GRAD_ACC_STEPS = 1  # used to simulate larger batch sizes
 MAX_ITERS = 100_000
 
 EVAL_INTERVAL = 500
@@ -46,7 +51,7 @@ EVAL_ONLY = False  # if True, script exits right after the first eval
 SAVE_EVERY = False  # save unique checkpoint at every eval interval.
 GRADIENT_CLIP = None  # 5
 # adam optimizer
-BATCH_SIZE = 8
+BATCH_SIZE = 16
 LR = 2e-4
 # system
 # dtype = 'bfloat16' # 'float32' or 'bfloat16'
@@ -67,9 +72,11 @@ if (CFG is not None) and Path(CFG).is_file():
 # =============================================================
 # Dataset, Dataloader init
 # =============================================================
-trainset, evalset = ImageSet(TRAIN_IMG_DIR, EXT), ImageSet(EVAL_IMG_DIR, EXT)
+trainset, evalset = ImageSet(TRAIN_IMG_DIR, EXT, 0.5), ImageSet(EVAL_IMG_DIR, EXT, 0.5)
 trainloader = DataLoader(trainset, BATCH_SIZE, shuffle=True)
 evalloader = DataLoader(evalset, BATCH_SIZE, shuffle=True)
+# trainset, evalset = load_cifar()
+# trainloader, evalloader = data_loaders(trainset, evalset, BATCH_SIZE)
 
 # =============================================================
 # Load Checkpoint
@@ -84,7 +91,11 @@ vqgan = VQGAN(
     PERCEPTUAL_LOSS, BETA, LR, DEVICE,
     net_ckpt, inference=False,
 )
-
+# vqgan = VQGAN(
+#     IN_CH, RES_LAYERS, HIDDEN_CH, NUM_EMB, 
+#     PERCEPTUAL_LOSS, BETA, LR, DEVICE,
+#     net_ckpt, inference=False,
+# )
 # =============================================================
 # Training loop - forward, backward, loss, optimize
 # =============================================================
